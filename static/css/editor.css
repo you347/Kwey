@@ -1,0 +1,173 @@
+/* ============ Kwey 编辑器与预览 ============ */
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 18px;
+  flex: none;
+}
+.mode-switch { display: inline-flex; gap: 4px; }
+.mode-switch .btn--mini.btn--active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.save-state { font-size: 12px; color: var(--text-dim); }
+
+.note-title {
+  padding: 0 18px 6px;
+  font-size: 20px;
+  font-weight: 700;
+  flex: none;
+}
+
+.editor-container {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------------- 源码窗格 ---------------- */
+.editor-pane { flex: 1; min-width: 0; overflow: hidden; display: flex; }
+
+/* 降级：增强 textarea（CodeMirror 缺失时） */
+.fallback-editor { display: flex; flex: 1; min-height: 0; }
+.editor-gutter {
+  flex: none;
+  width: 44px;
+  padding: 10px 6px;
+  text-align: right;
+  color: var(--text-dim);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  user-select: none;
+}
+.editor-textarea {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  resize: none;
+  padding: 10px 14px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--text);
+}
+.editor-textarea:focus { border: none; }
+
+/* 模式可见性 */
+.editor-area[data-mode="source"] .preview-pane { display: none; }
+.editor-area[data-mode="preview"] .editor-pane { display: none; }
+.editor-area[data-mode="split"] .editor-container { flex-direction: row; }
+.editor-area[data-mode="split"] .preview-pane { border-left: 1px solid var(--border); }
+
+/* ---------------- 预览窗格 ---------------- */
+.preview-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 14px 22px 40px;
+  line-height: 1.7;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 0.9em 0 0.4em; line-height: 1.35; }
+.markdown-body h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.markdown-body h2 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: 0.15em; }
+.markdown-body h3 { font-size: 1.2em; }
+.markdown-body p { margin: 0.5em 0; }
+.markdown-body ul, .markdown-body ol { margin: 0.5em 0; padding-left: 1.6em; }
+.markdown-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 1em;
+  border-left: 3px solid var(--accent);
+  color: var(--text-dim);
+  background: var(--bg-alt);
+}
+.markdown-body code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.markdown-body pre code { background: transparent; padding: 0; }
+.markdown-body table { border-collapse: collapse; margin: 0.6em 0; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 10px; }
+.markdown-body img { max-width: 100%; border-radius: 4px; }
+.markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+.markdown-body a { color: var(--accent); }
+.preview-error { color: var(--broken); padding: 10px 0; }
+
+/* ---------------- wikilink / 嵌入 / 标签 ---------------- */
+.kwey-wikilink {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent);
+}
+.kwey-wikilink:hover { background: var(--bg-hover); }
+.kwey-wikilink--broken {
+  color: var(--broken);
+  border-bottom: 1px dashed var(--broken);
+  cursor: pointer;
+}
+.kwey-embed {
+  display: block;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 0.6em 0;
+  background: var(--bg-alt);
+}
+.kwey-embed--missing { color: var(--broken); border-left-color: var(--broken); }
+.kwey-embed-image { max-width: 100%; display: block; }
+.kwey-tag {
+  color: var(--tag);
+  cursor: pointer;
+  font-size: 0.9em;
+  background: var(--bg-panel);
+  border-radius: 8px;
+  padding: 1px 7px;
+}
+.kwey-tag:hover { background: var(--bg-hover); }
+
+/* ---------------- CodeMirror 主题对齐（vendored CM5） ---------------- */
+.CodeMirror {
+  height: 100% !important;
+  flex: 1;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--text);
+}
+.CodeMirror-gutters { background: var(--bg-alt); border-right: 1px solid var(--border); }
+.CodeMirror-linenumber { color: var(--text-dim); }
+.CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.CodeMirror-selected { background: var(--bg-hover) !important; }
+.CodeMirror-activeline-background { background: var(--bg-panel); }
+.cm-s-kwey.cm-header { color: var(--accent); font-weight: 700; }
+.cm-s-kwey.cm-string, .cm-s-kwey.cm-link { color: #2da44e; }
+.cm-s-kwey.cm-keyword, .cm-s-kwey.cm-quote { color: var(--tag); }
+.cm-s-kwey.cm-comment { color: var(--text-dim); }
+.cm-s-kwey.cm-em { font-style: italic; }
+.cm-s-kwey.cm-strong { font-weight: 700; }
+html[data-theme="dark"] .cm-s-kwey.cm-string,
+html[data-theme="dark"] .cm-s-kwey.cm-link { color: #7ee787; }

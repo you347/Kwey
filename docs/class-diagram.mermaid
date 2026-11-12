@@ -1,0 +1,168 @@
+// Kwey M1 核心数据结构与接口（与 docs/ARCHITECTURE.md 同步；SQLite 表结构见架构文档 §3.1）
+
+classDiagram
+    direction TB
+
+    class EventType {
+        <<enumeration>>
+        CREATED
+        UPDATED
+        DELETED
+        MOVED
+        LINKS_CHANGED
+        INDEX_READY
+    }
+
+    class VaultEvent {
+        +str event
+        +str path
+        +str old_path
+        +float ts
+    }
+
+    class EventBus {
+        -dict~str, list~ subscribers
+        +subscribe(event_type, handler)
+        +publish(VaultEvent)
+    }
+
+    class AppPaths {
+        <<utility>>
+        +vault_root : Path
+        +to_abs(relative_path) Path
+        +to_rel(absolute_path) str
+        +validate_relative(path) str
+        +sanitize_filename(name) str
+        +is_ignored(path) bool
+    }
+
+    class AppSettings {
+        +str theme
+        +str attachment_dir
+        +load() AppSettings
+        +save()
+    }
+
+    class NoteDoc {
+        +str path
+        +str title
+        +str content
+        +dict frontmatter
+        +float mtime
+    }
+
+    class MarkdownParser {
+        <<module parser/>>
+        +parse_frontmatter(raw) tuple
+        +dump_frontmatter(fm, body) str
+        +extract_wikilinks(body) list~LinkRef~
+        +extract_inline_tags(body) list~str~
+        +render_html(body) str
+    }
+
+    class LinkRef {
+        +str target
+        +str kind
+        +int line
+    }
+
+    class IndexDatabase {
+        -sqlite3.Connection conn
+        +connect()
+        +create_schema()
+        +rebuild_all()
+        +search_fts(query, filters) list~SearchHit~
+        +upsert_note(meta)
+        +replace_links(path, links)
+        +replace_tags(path, tags)
+        +remove_note(path)
+    }
+
+    class LinkGraph {
+        -dict out_links
+        -dict in_links
+        -dict by_basename
+        +resolve(target) str|None
+        +backlinks(path) set
+        +unlinked_mentions(title) list
+        +rebuild(links_rows)
+        +apply(path, links)
+        +remove(path)
+    }
+
+    class Indexer {
+        +full_scan()
+        +reindex_note(path)
+        +remove_note(path)
+        -parse_and_store(path)
+    }
+
+    class VaultService {
+        -RLock lock
+        -dict recent_self_writes
+        +open_vault(root)
+        +read_note(path) NoteDoc
+        +create_note(path, content, fm) NoteDoc
+        +write_note(path, content, fm, base_mtime) dict
+        +rename_note(path, new_name) dict
+        +move_note(path, new_dir) dict
+        +delete_note(path) str
+        +save_attachment(filename, data) str
+    }
+
+    class VaultWatcher {
+        -bool running
+        +start()
+        +stop()
+        -on_changes(changes)
+        -is_self_write(path) bool
+    }
+
+    class LinkRewriter {
+        <<module vault/links>>
+        +rewrite_on_rename(old_path, new_path) int
+        +collect_referencing_files(path) list
+    }
+
+    class ApiRoutes {
+        <<module api/>>
+        +routes_system()
+        +routes_notes()
+        +routes_files()
+        +routes_search()
+        +routes_graph()
+    }
+
+    class WsHub {
+        +broadcast(VaultEvent)
+        +handle_socket(ws)
+    }
+
+    EventBus "1" o-- "0..*" VaultEvent : publishes
+    VaultService --> AppPaths : 路径校验/转换
+    VaultService --> AppSettings : 读取配置
+    VaultService --> Indexer : 写后增量重索引
+    VaultService --> EventBus : 广播事件
+    VaultService --> LinkRewriter : 改名/移动时重写链接
+    VaultWatcher --> Indexer : 外部改动增量索引
+    VaultWatcher --> EventBus : 广播外部变更
+    VaultWatcher ..> VaultService : 查询自写集合（防回环）
+    Indexer --> IndexDatabase : 写 SQLite
+    Indexer --> LinkGraph : 同步内存图
+    Indexer --> MarkdownParser : 解析磁盘文件
+    IndexDatabase --> LinkGraph : 重建时灌入 links
+    ApiRoutes --> VaultService : 全部写操作
+    ApiRoutes --> IndexDatabase : 读索引/搜索
+    ApiRoutes --> LinkGraph : 反链/解析
+    ApiRoutes --> WsHub : 事件出口
+    WsHub --> EventBus : 订阅转发
+    LinkRef --* MarkdownParser : 产出
+    NoteDoc --* VaultService : 产出/消费
+    SearchHit --* IndexDatabase : 产出
+    class SearchHit {
+        +str path
+        +str title
+        +float score
+        +str snippet
+        +list tags
+    }

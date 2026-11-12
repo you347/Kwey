@@ -1,0 +1,84 @@
+// Kwey M1 关键调用流程时序图（与 docs/ARCHITECTURE.md §5 同步）
+
+// 5.1 统一写路径（所有写操作唯一通道）
+sequenceDiagram
+    participant UI as 前端 (editor.js)
+    participant API as PUT /api/note
+    participant VS as VaultService
+    participant Disk as 磁盘 Markdown
+    participant IX as Indexer/LinkGraph
+    participant EB as EventBus
+    participant WS as WebSocket /ws/events
+
+    UI->>API: {path, content, frontmatter, base_mtime}
+    API->>VS: write_note(path, content, fm, base_mtime)
+    VS->>VS: RLock 加锁
+    VS->>VS: paths.validate() 安全校验/编码检查
+    VS->>Disk: 临时文件写入 + os.replace 原子替换
+    VS->>VS: 记录自写路径+时间戳（防 watcher 回环）
+    VS->>IX: reindex_note(path) 增量更新 SQLite+内存图
+    IX-->>VS: links_changed?
+    VS->>EB: broadcast(UPDATED / MOVED / LINKS_CHANGED)
+    EB-->>WS: 推送事件 JSON
+    WS-->>UI: 事件（其他标签页/面板刷新）
+    API-->>UI: {code:0, data:{updated, links_changed}}
+
+// 5.2 双链解析与反向链接查询
+sequenceDiagram
+    participant UI as 前端
+    participant API as API 层
+    participant LG as LinkGraph(内存)
+    participant DB as SQLite
+    participant VS as VaultService
+
+    Note over UI: 编辑器输入 [[目标|别名]]
+    UI->>API: GET /api/note/resolve?target=目标
+    API->>LG: resolve(target)
+    LG-->>API: {exists, path 或 null}
+    alt 目标不存在
+        UI->>API: POST /api/note {path}
+        API->>VS: create_note()
+        VS->>IX: 增量索引 → by_basename 注册
+    end
+    Note over UI: 打开笔记 → 右侧反链面板
+    UI->>API: GET /api/graph/backlinks?path=当前
+    API->>LG: in_links[当前]
+    API->>DB: 取引用方 title + 链接上下文
+    API-->>UI: backlinks 列表（点击跳转）
+    UI->>API: GET /api/graph/unlinked?path=当前
+    API->>DB: FTS5 body MATCH title
+    API-->>UI: 未链接提及列表（一键 linkify）
+
+// 5.3 全文搜索（含操作符）
+sequenceDiagram
+    participant UI as 前端 search.js
+    participant API as GET /api/search
+    participant QP as 查询解析
+    participant DB as SQLite FTS5
+
+    UI->>API: q="path:子目录 tag:a/b 关键词"
+    API->>QP: 提取操作符 + 剩余词
+    QP-->>API: {prefix_path, tag, file, fts_query}
+    API->>DB: SELECT ... FROM notes_fts WHERE notes_fts MATCH ? (BM25 排序)
+    API->>DB: path LIKE 过滤 / tags 表过滤 / basename 过滤
+    API->>DB: snippet(notes_fts, ...) 取高亮片段
+    API-->>UI: {hits, total, elapsed_ms}
+    Note over UI: 目标 ≤200ms @1000 笔记
+
+// 5.4 快速切换（Ctrl+O）与文件改名联动
+sequenceDiagram
+    participant UI as 前端 switcher.js
+    participant API as API 层
+    participant DB as SQLite
+
+    Note over UI: Ctrl+O 输入 "读书" 模糊片段
+    UI->>API: GET /api/search?q=file:读书&limit=20
+    API->>DB: basename 匹配 + FTS5 title 权重
+    API-->>UI: 候选列表（≤300ms）
+    UI->>UI: Enter/方向键选择 → 打开标签页
+
+    Note over UI,API: 改名联动（文件树 rename）
+    UI->>API: POST /api/files/rename {path, new_name}
+    API->>DB: SELECT source_path FROM links WHERE target_path=旧路径
+    API->>API: 逐个文件重写 [[旧]] → [[新]]（走 VaultService 统一写路径）
+    API-->>UI: MOVED + LINKS_CHANGED 事件 → 反链面板/标签页同步更新

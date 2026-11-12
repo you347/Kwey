@@ -1,0 +1,14 @@
+# Kwey M1 依赖（Python 3.13 / Windows；安装统一使用 python -m pip install -r requirements.txt）
+
+fastapi>=0.115.0          # REST + WS + 静态托管
+uvicorn[standard]>=0.30.0 # ASGI 服务器（standard 含 websockets/watchfiles 加速）
+pywebview>=5.1            # 桌面壳（Windows 走 Edge WebView2；--server 模式不加载）
+markdown-it-py>=3.0.0     # Markdown 渲染
+python-frontmatter>=1.1.0 # YAML frontmatter 解析/写回（自带 PyYAML 依赖）
+python-multipart>=0.0.9   # FastAPI multipart 附件上传
+watchfiles>=0.24.0        # 文件监听（防抖）
+PyYAML>=6.0               # frontmatter 依赖显式声明
+
+# 开发/测试
+pytest>=8.0.0
+httpx>=0.27.0             # FastAPI TestClient 依赖

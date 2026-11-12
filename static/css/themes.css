@@ -1,0 +1,56 @@
+/* ============ Kwey 主题变量（P0-13：暗色/亮色即时切换并持久化） ============ */
+
+:root,
+html[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-alt: #f6f8fa;
+  --bg-panel: #eff2f5;
+  --bg-hover: #e7ebf0;
+  --text: #24292f;
+  --text-dim: #6a737d;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --accent-text: #ffffff;
+  --mark: #fff1a8;
+  --broken: #cf222e;
+  --tag: #0969da;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.14);
+  --code-bg: #f0f2f4;
+  --scrollbar: #c4cdd6;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --bg: #1e1e1e;
+  --bg-alt: #252526;
+  --bg-panel: #2d2d30;
+  --bg-hover: #3a3d41;
+  --text: #d4d4d4;
+  --text-dim: #9da0a6;
+  --border: #3c3c3c;
+  --accent: #4c8dff;
+  --accent-text: #10151c;
+  --mark: #6b5900;
+  --broken: #f85149;
+  --tag: #79b8ff;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+  --code-bg: #2a2a2e;
+  --scrollbar: #4a4d52;
+  color-scheme: dark;
+}
+
+/* 主题切换即时生效 */
+body,
+.sidebar,
+.rightbar,
+.tabbar,
+.titlebar,
+.statusbar,
+.overlay__panel,
+.settings-page__panel,
+.btn,
+input,
+select,
+textarea {
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Kwey · 个人知识库</title>
+  <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css"/>
+  <link rel="stylesheet" href="/static/css/themes.css"/>
+  <link rel="stylesheet" href="/static/css/base.css"/>
+  <link rel="stylesheet" href="/static/css/layout.css"/>
+  <link rel="stylesheet" href="/static/css/panels.css"/>
+  <link rel="stylesheet" href="/static/css/editor.css"/>
+</head>
+<body>
+  <!-- ======================= 标题栏 ======================= -->
+  <header id="titlebar" class="titlebar">
+    <div class="titlebar__brand">Kwey <span id="vault-name" class="titlebar__vault"></span></div>
+    <div class="titlebar__actions">
+      <button id="btn-theme" class="btn btn--ghost" title="切换主题">🌗 主题</button>
+      <button id="btn-settings" class="btn btn--ghost" title="设置">⚙ 设置</button>
+    </div>
+  </header>
+
+  <!-- ======================= 三栏主区 ======================= -->
+  <div id="layout" class="layout">
+    <!-- 左侧边栏 -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar__section sidebar__section--grow">
+        <div class="sidebar__header">
+          <span>文件</span>
+          <span class="sidebar__header-actions">
+            <button id="btn-new-note" class="btn btn--mini" title="新建笔记">＋笔记</button>
+            <button id="btn-new-dir" class="btn btn--mini" title="新建目录">＋目录</button>
+          </span>
+        </div>
+        <div id="filetree" class="filetree" aria-label="文件树"></div>
+      </div>
+      <div class="sidebar__section">
+        <div class="sidebar__header"><span>标签</span></div>
+        <div id="tagpanel" class="tagpanel"></div>
+      </div>
+    </aside>
+    <button id="sidebar-collapse" class="collapse-btn" title="折叠/展开侧栏">«</button>
+
+    <!-- 中央编辑区 -->
+    <main class="center">
+      <div class="tabbar">
+        <div id="tabs" class="tabbar__tabs"></div>
+        <button id="btn-search" class="btn btn--ghost" title="搜索 (Ctrl+Shift+F)">🔍 搜索</button>
+      </div>
+
+      <div id="editor-area" class="editor-area hidden">
+        <div class="editor-toolbar">
+          <div class="mode-switch" id="mode-switch">
+            <button data-mode="source" class="btn btn--mini">源码</button>
+            <button data-mode="split" class="btn btn--mini">分屏</button>
+            <button data-mode="preview" class="btn btn--mini">预览</button>
+          </div>
+          <span id="save-state" class="save-state"></span>
+        </div>
+        <h1 id="note-title" class="note-title"></h1>
+        <div id="properties" class="properties"></div>
+        <div id="editor-container" class="editor-container">
+          <div id="editor-source" class="editor-pane">
+            <div class="fallback-editor">
+              <pre id="editor-gutter" class="editor-gutter" aria-hidden="true"></pre>
+              <textarea id="editor-textarea" class="editor-textarea" spellcheck="false"
+                placeholder="使用 Markdown 书写… 支持 [[双链]]、[[目标|别名]]、![[嵌入]]、#标签"></textarea>
+            </div>
+          </div>
+          <div id="editor-preview" class="preview-pane markdown-body"></div>
+        </div>
+      </div>
+
+      <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-screen__inner">
+          <h2>Kwey</h2>
+          <p id="welcome-hint">打开一个文件夹作为知识库（vault），磁盘 Markdown 是唯一事实源。</p>
+          <button id="btn-open-vault" class="btn btn--primary">打开 Vault</button>
+          <p class="welcome-screen__tips">Ctrl+O 快速切换 · Ctrl+P 命令面板 · Ctrl+Shift+F 搜索</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右侧面板 -->
+    <aside id="rightbar" class="rightbar">
+      <div class="sidebar__section">
+        <div class="sidebar__header"><span>反向链接</span></div>
+        <div id="backlinks" class="backlinks"></div>
+      </div>
+      <div class="sidebar__section">
+        <div class="sidebar__header"><span>未链接提及</span></div>
+        <div id="unlinked" class="unlinked"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ======================= 状态栏 ======================= -->
+  <footer id="statusbar" class="statusbar">
+    <span id="status-words">字数 0</span>
+    <span id="status-save">—</span>
+    <span class="statusbar__spacer"></span>
+    <span id="status-index">索引：—</span>
+  </footer>
+
+  <!-- ======================= 浮层：搜索 ======================= -->
+  <div id="overlay-search" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--wide">
+      <input id="search-input" class="overlay__input" placeholder="搜索正文… 支持 path:目录 tag:标签 file:文件名"
+        autocomplete="off"/>
+      <div id="search-results" class="overlay__results"></div>
+      <div class="overlay__hint">Enter 打开首个 · Esc 关闭</div>
+    </div>
+  </div>
+
+  <!-- ======================= 浮层：快速切换 Ctrl+O ======================= -->
+  <div id="overlay-switcher" class="overlay hidden">
+    <div class="overlay__panel">
+      <input id="switcher-input" class="overlay__input" placeholder="输入笔记名快速切换…" autocomplete="off"/>
+      <div id="switcher-results" class="overlay__results"></div>
+      <div class="overlay__hint">↑↓ 选择 · Enter 打开 · Esc 关闭</div>
+    </div>
+  </div>
+
+  <!-- ======================= 浮层：命令面板 Ctrl+P ======================= -->
+  <div id="overlay-palette" class="overlay hidden">
+    <div class="overlay__panel">
+      <input id="palette-input" class="overlay__input" placeholder="输入命令…" autocomplete="off"/>
+      <div id="palette-results" class="overlay__results"></div>
+      <div class="overlay__hint">↑↓ 选择 · Enter 执行 · Esc 关闭</div>
+    </div>
+  </div>
+
+  <!-- ======================= 设置页 ======================= -->
+  <div id="settings-page" class="settings-page hidden">
+    <div class="settings-page__panel">
+      <div class="settings-page__header">
+        <h2>设置</h2>
+        <button id="btn-settings-close" class="btn btn--ghost">✕ 关闭</button>
+      </div>
+
+      <section class="settings-section">
+        <h3>外观</h3>
+        <label class="settings-row">主题
+          <select id="settings-theme">
+            <option value="light">亮色</option>
+            <option value="dark">暗色</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="settings-section">
+        <h3>附件</h3>
+        <label class="settings-row">附件目录（vault 相对路径）
+          <input id="settings-attachment-dir" type="text" placeholder="attachments"/>
+        </label>
+      </section>
+
+      <section class="settings-section">
+        <h3>Vault</h3>
+        <div class="settings-row">
+          <input id="settings-vault-path" type="text" placeholder="输入 vault 绝对路径，如 D:/notes"/>
+          <button id="btn-vault-open" class="btn btn--primary">打开</button>
+        </div>
+        <p id="settings-vault-info" class="settings-muted"></p>
+      </section>
+
+      <section class="settings-section settings-section--disabled">
+        <h3>Agent Link（M2 敬请期待）</h3>
+        <p class="settings-muted">MCP Server · 事件订阅 · Provider 适配 · Token 鉴权</p>
+      </section>
+      <section class="settings-section settings-section--disabled">
+        <h3>向量检索（M3 敬请期待）</h3>
+        <p class="settings-muted">Chroma 混合排序 · bge-small-zh 本地 embedding</p>
+      </section>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
