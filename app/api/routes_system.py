@@ -95,9 +95,11 @@ static_router = APIRouter(tags=["static"])
 
 def _serve_vault_file(raw_rel: str) -> FileResponse:
     vault = deps.require_vault()
-    rel = validate_relative(raw_rel)
-    if is_ignored(rel):
+    rel_norm = normalize_rel(raw_rel)
+    # 保留目录/临时文件先拦（404），再做完整合法性校验
+    if is_ignored(rel_norm) or rel_norm.endswith(".kwey-tmp"):
         raise HTTPException(status_code=404, detail="文件不存在")
+    rel = validate_relative(raw_rel)
     abs_path = vault.paths.to_abs(rel)
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {rel}")

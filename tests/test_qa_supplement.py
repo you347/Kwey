@@ -108,7 +108,12 @@ class TestPathSecurity:
         assert resp.status_code == 400
 
     def test_write_into_hidden_dir(self, client):
-        """写入 .kwey/ 等隐藏目录：期望被拒绝（记录实际行为）。"""
+        """写入 .kwey/ 等隐藏目录：期望被拒绝（记录实际行为）。
+
+        【修复确认 B2】app/paths.py validate_relative 现已对任一片段命中
+        IGNORED_DIRS（.kwey/.trash/.git）及 *.kwey-tmp 抛 PathError → HTTP 400；
+        VaultService 内部对 .trash/ 的合法移动不经此校验路径，不受影响。
+        """
         resp = client.post("/api/note", json={"path": ".kwey/隐藏笔记.md"})
         if resp.status_code == 200:
             pytest.fail(
@@ -135,7 +140,14 @@ class TestPathSecurity:
 class TestSearchRobustness:
     @pytest.mark.parametrize("q", ['"', 'a**b', "-", "会议\"查询", "((( ", "\\AND"])
     def test_special_chars_no_500(self, client, q):
-        """FTS5 MATCH 语法注入不应导致 500（应 200 或 400）。"""
+        """FTS5 MATCH 语法注入不应导致 500（应 200 或 400）。
+
+        【修复确认 B1】app/api/routes_search.py build_match_terms 已消毒：
+        - ASCII 词只保留 \\w 字符（词中 * 与引号全剥离），仅安全 bareword 追加尾部 `*`；
+        - FTS5 保留字 AND/OR/NOT/NEAR 转引号短语；
+        - CJK 词剥离非法字符后引号短语化；
+        另在 GET /api/search 兜底捕获异常转 400，双重保证任意输入不 500。
+        """
         resp = client.get("/api/search", params={"q": q})
         assert resp.status_code != 500, (
             f"查询 {q!r} 返回 500：FTS5 语法错误未在 build_match_terms 中消毒，"
@@ -315,7 +327,12 @@ class TestAttachmentSettings:
         assert not (bad & set(name)), f"非法字符未被消毒: {name}"
 
     def test_delete_dir_cleans_graph(self, client, vault_dir):
-        """目录删除后，其下附件不应再可按 basename 解析（图清理）。"""
+        """目录删除后，其下附件不应再可按 basename 解析（图清理）。
+
+        【修复确认 B3】app/vault/service.py delete_dir 现已在移动前枚举目录内
+        全部文件：笔记走 remove_note(break_links=True)，附件等非笔记文件走
+        remove_file_entry 清链接图登记，嵌入不再解析到已删文件。
+        """
         (vault_dir / "临时附件" ).mkdir()
         (vault_dir / "临时附件" / "临时图.png").write_bytes(b"png")
         from app.api import deps as d

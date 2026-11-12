@@ -51,13 +51,22 @@ def sanitize_filename(name: str) -> str:
 
 
 def validate_relative(path: Optional[str]) -> str:
-    """校验并规范化 vault 相对路径；非法抛 PathError。"""
+    """校验并规范化 vault 相对路径；非法抛 PathError。
+
+    B2 修复：任一路径片段命中系统保留目录（.kwey/.trash/.git）直接拒绝，
+    杜绝经 API 向隐藏目录写笔记/读文件。内部对 .trash/ 的合法移动
+    （delete_note/delete_dir）不经此函数，不受影响。
+    """
     rel = normalize_rel(path)
     if not rel:
         raise PathError("路径为空")
     for part in rel.split("/"):
         if part in ("", ".", ".."):
             raise PathError(f"非法路径片段: {part!r}")
+        if part in IGNORED_DIRS:
+            raise PathError(f"系统保留目录不可读写: {part!r}")
+        if part.endswith(".kwey-tmp"):
+            raise PathError(f"临时文件路径不可读写: {part!r}")
         if ":" in part:  # 盘符 / 流分隔
             raise PathError(f"路径含非法字符: {part!r}")
         if any(c in ILLEGAL_FILENAME_CHARS for c in part):
@@ -67,6 +76,12 @@ def validate_relative(path: Optional[str]) -> str:
         if part.rsplit(".", 1)[0].upper() in WINDOWS_RESERVED:
             raise PathError(f"Windows 保留名: {part!r}")
     return rel
+
+
+def is_temp_path(rel: Optional[str]) -> bool:
+    """是否为原子写临时文件或系统保留目录路径（B5：事件广播层过滤杂音）。"""
+    rel = normalize_rel(rel)
+    return rel.endswith(".kwey-tmp") or is_ignored(rel)
 
 
 def is_ignored(rel: Optional[str]) -> bool:

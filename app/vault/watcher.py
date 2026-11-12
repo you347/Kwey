@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from app.events import EventType, VaultEvent
-from app.paths import is_ignored
+from app.paths import is_temp_path
 from app.vault.service import VaultService
 
 logger = logging.getLogger("kwey.watcher")
@@ -79,12 +79,12 @@ class VaultWatcher:
             self.running = False
 
     def _filter(self, change, path_str: str) -> bool:
-        """watchfiles 过滤：忽略 .kwey/.trash/.git。"""
+        """watchfiles 过滤：忽略 .kwey/.trash/.git 与 *.kwey-tmp 临时文件（B5）。"""
         try:
             rel = self.service.paths.to_rel(Path(path_str))
         except Exception:  # noqa: BLE001
             return False
-        return not is_ignored(rel)
+        return not is_temp_path(rel)
 
     # ------------------------------------------------------------------ handling
     def _process_changes(self, changes) -> None:
@@ -103,8 +103,8 @@ class VaultWatcher:
                 rel = self.service.paths.to_rel(abs_path)
             except Exception:  # noqa: BLE001
                 continue
-            if is_ignored(rel):
-                continue
+            if is_temp_path(rel):
+                continue  # B5：临时文件/保留目录不索引、不广播
             # 自写去重：VaultService 落盘记录过的事件直接跳过
             if self.service.is_self_write(rel):
                 continue

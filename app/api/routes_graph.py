@@ -30,7 +30,8 @@ async def backlinks(path: str):
     vault = deps.require_vault()
     linkgraph = deps.require_linkgraph()
     db = deps.require_db()
-    sources = sorted(linkgraph.backlinks(path))
+    # B4 修复：排除自身引用（自嵌入 ![[自身]] 不进反链面板，与 Obsidian 惯例一致）
+    sources = sorted(linkgraph.backlinks(path) - {path})
     items: List[dict] = []
     for src in sources:
         note = db.get_note(src)

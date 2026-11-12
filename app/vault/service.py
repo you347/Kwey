@@ -319,17 +319,36 @@ class VaultService:
                 raise HTTPException(status_code=404, detail=f"目录不存在: {rel}")
             if not confirm and any(abs_path.rglob("*")):
                 raise HTTPException(status_code=409, detail="目录非空，需要 confirm 确认")
+
+            # B3 修复：移动前枚举目录内全部文件（笔记 + 附件等），逐一清理索引与链接图
+            child_rels: List[str] = []
+            for p in abs_path.rglob("*"):
+                if not p.is_file():
+                    continue
+                try:
+                    child_rel = self.paths.to_rel(p)
+                except Exception:  # noqa: BLE001
+                    continue
+                if is_ignored(child_rel) or child_rel.endswith(".kwey-tmp"):
+                    continue
+                child_rels.append(child_rel)
+
             trash_rel = AppPaths.unique_path(
                 f".trash/{rel}", exists_fn=lambda p: (self.paths.root / p).exists()
             )
             trash_abs = self.paths.root / trash_rel
             trash_abs.parent.mkdir(parents=True, exist_ok=True)
             os.replace(abs_path, trash_abs)
-            # 清理索引：目录下全部已索引条目
-            for note in self.db.all_notes():
-                if note["path"] == rel or note["path"].startswith(rel + "/"):
-                    self.indexer.remove_note(note["path"], break_links=True)
-                    self.eventbus.publish(VaultEvent(EventType.DELETED, path=note["path"]))
+            self._mark_self_write(rel)
+            self._mark_self_write(trash_rel)
+
+            # 清理索引与内存图：笔记（含断链标记）+ 附件等非笔记文件的图登记（B3）
+            for child_rel in sorted(child_rels):
+                if child_rel.lower().endswith(tuple(MARKDOWN_EXTS)):
+                    self.indexer.remove_note(child_rel, break_links=True)
+                else:
+                    self.indexer.remove_file_entry(child_rel)
+                self.eventbus.publish(VaultEvent(EventType.DELETED, path=child_rel))
             self.eventbus.publish(VaultEvent(EventType.DELETED, path=rel))
             return trash_rel
 

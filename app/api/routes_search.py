@@ -15,7 +15,12 @@ from app.paths import normalize_rel
 router = APIRouter(prefix="/api", tags=["search"])
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
-_ASCII_TERM_RE = re.compile(r"[^\w*]+")
+# ASCII 词只保留字母/数字/下划线（B1 修复：彻底剥离 *、引号、括号等一切 FTS5 语法字符）
+_ASCII_TERM_RE = re.compile(r"[^\w]+")
+# FTS5 保留关键字：作 bareword 会引发语法错误，需转引号短语（B1 修复）
+FTS_RESERVED = {"and", "or", "not", "near"}
+# CJK/普通词的合法字符（含空格，供按字切分）
+_CJK_TERM_CLEAN_RE = re.compile(r"[^\w\s\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+")
 
 
 def _has_cjk(text: str) -> bool:
@@ -23,23 +28,31 @@ def _has_cjk(text: str) -> bool:
 
 
 def build_match_terms(terms: List[str]) -> List[str]:
-    """用户检索词 → FTS5 MATCH 片段。
+    """用户检索词 → FTS5 MATCH 片段（B1 修复：消毒后保证任意输入不产生语法错误）。
 
-    - 含 CJK：按字切分为短语（引号包裹保证相邻，风险点④）。
-    - ASCII：清洗后前缀匹配（term*）。
+    - 含 CJK：剥离非法字符 → 按字切分为引号短语（引号内为纯 token，杜绝注入）。
+    - ASCII：只保留 \\w 字符；保留字（AND/OR/NOT/NEAR）转引号短语；
+      其余安全词用 `term*` 前缀匹配。
+    - 清洗后为空的词直接丢弃。
     """
     match_terms: List[str] = []
     for term in terms:
-        term = term.strip()
+        term = (term or "").strip()
         if not term:
             continue
         if _has_cjk(term):
-            phrase = cjk_space(term).strip()
-            match_terms.append(f'"{phrase}"')
+            clean = _CJK_TERM_CLEAN_RE.sub(" ", term)
+            phrase = cjk_space(clean).strip()
+            if phrase:
+                match_terms.append(f'"{phrase}"')
         else:
-            clean = _ASCII_TERM_RE.sub("", term).strip("*")
-            if clean:
-                match_terms.append(f"{clean}*")
+            word = _ASCII_TERM_RE.sub("", term)
+            if not word:
+                continue
+            if word.lower() in FTS_RESERVED:
+                match_terms.append(f'"{word}"')  # 引号短语 → 不再是关键字
+            else:
+                match_terms.append(f"{word}*")   # 安全 bareword 前缀匹配
     return match_terms
 
 
@@ -72,13 +85,17 @@ async def search(
     match_terms = build_match_terms(parsed["terms"])  # type: ignore[arg-type]
 
     started = time.perf_counter()
-    hits, total = db.search(
-        terms=match_terms,
-        path_prefix=parsed["path"],  # type: ignore[arg-type]
-        tag=parsed["tag"],  # type: ignore[arg-type]
-        file_pattern=parsed["file"],  # type: ignore[arg-type]
-        limit=limit,
-    )
+    try:
+        hits, total = db.search(
+            terms=match_terms,
+            path_prefix=parsed["path"],  # type: ignore[arg-type]
+            tag=parsed["tag"],  # type: ignore[arg-type]
+            file_pattern=parsed["file"],  # type: ignore[arg-type]
+            limit=limit,
+        )
+    except Exception as exc:
+        # 兜底：任何漏网的 FTS5 语法错误不应 500（B1 双保险）
+        raise HTTPException(status_code=400, detail=f"查询语法不受支持: {exc}") from exc
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     return {
         "code": 0,
