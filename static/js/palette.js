@@ -1,17 +1,27 @@
-/* 命令面板 Ctrl+P：命令注册表 + 模糊匹配 + 快捷键提示（P0-9）。 */
+/* 命令面板 Ctrl+P：命令注册表（按 id 去重/可注销）+ 模糊匹配 + 快捷键提示。 */
 
 import { fuzzyScore, $ } from './utils.js';
 
-const registry = [];
+const registry = new Map();
 let overlayEl = null;
 let inputEl = null;
 let resultsEl = null;
 let filtered = [];
 let selected = 0;
 
-/** 注册命令：{id, title, hotkey?, run}。 */
+/** 注册命令：{id, title, hotkey?, run}。同 id 覆盖，避免动态命令重复累积。 */
 export function registerCommand(cmd) {
-  registry.push(cmd);
+  registry.set(cmd.id, cmd);
+}
+
+export function unregisterCommand(id) {
+  return registry.delete(id);
+}
+
+/** 快捷键自定义后同步面板里的展示文本。 */
+export function setHotkeyLabel(id, label) {
+  const cmd = registry.get(id);
+  if (cmd) cmd.hotkey = label;
 }
 
 export function initPalette() {
@@ -42,11 +52,11 @@ export function closePalette() {
 }
 
 export function getCommands() {
-  return registry.slice();
+  return Array.from(registry.values());
 }
 
 function render(query) {
-  filtered = registry
+  filtered = Array.from(registry.values())
     .map((cmd) => ({ cmd, score: fuzzyScore(query, cmd.title) }))
     .filter((x) => x.score >= 0)
     .sort((a, b) => b.score - a.score)

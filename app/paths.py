@@ -20,7 +20,9 @@ WINDOWS_RESERVED = {
     *(f"LPT{i}" for i in range(1, 10)),
 }
 ILLEGAL_FILENAME_CHARS = '<>:"|?*'
-IGNORED_DIRS = {".kwey", ".trash", ".git"}
+# templates/ 为 P1 模板目录：不作为普通笔记索引、不出现在文件树，
+# 其内容经 /api/templates 专用 API 直读（validate_relative 会拒绝该片段）。
+IGNORED_DIRS = {".kwey", ".trash", ".git", "templates"}
 
 
 class PathError(ValueError):

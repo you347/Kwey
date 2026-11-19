@@ -1,0 +1,33 @@
+# 运行/构建产物
+build/
+dist/
+release/
+out/
+*.exe
+*.manifest
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 用户 vault 与测试数据（含 .kwey/index.db、tokens.json、provider.json 等敏感内容）
+demo-vault/
+.kwey/
+*/.kwey/
+
+# 测试/验收临时产物
+tests/.tmp/
+
+# .workbuddy 只保留项目记忆，探测脚本/临时 vault 不入库
+.workbuddy/*
+!.workbuddy/memory/
+
+# 编辑器/系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

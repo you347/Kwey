@@ -8,4 +8,4 @@ M1 里程碑后端包。分层：
 磁盘 Markdown 永远是唯一事实源；.kwey/index.db 可随时删除重建。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

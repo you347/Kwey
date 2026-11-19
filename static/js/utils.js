@@ -1,5 +1,7 @@
 /* 通用工具：防抖、模糊匹配、路径处理、HTML 转义、Toast。 */
 
+import { askConfirm } from './dialog.js';
+
 /** 防抖：返回带 flush/cancel 的新函数。 */
 export function debounce(fn, wait = 250) {
   let timer = null;
@@ -58,7 +60,7 @@ export function fuzzyScore(query, text) {
   return score - Math.floor(t.length / 20);
 }
 
-/** Toast 提示。 */
+/** Toast 提示（退场带淡出动画）。 */
 export function toast(message, type = 'info', duration = 3200) {
   const box = document.getElementById('toasts');
   if (!box) return;
@@ -66,12 +68,48 @@ export function toast(message, type = 'info', duration = 3200) {
   el.className = `toast${type === 'error' ? ' toast--error' : ''}${type === 'success' ? ' toast--success' : ''}`;
   el.textContent = message;
   box.appendChild(el);
-  setTimeout(() => el.remove(), duration);
+  setTimeout(() => {
+    el.classList.add('toast--out');
+    setTimeout(() => el.remove(), 200);
+  }, duration);
 }
 
-/** 确认浮层（同步 confirm 简化版，M1 够用）。 */
-export function confirmDialog(message) {
-  return window.confirm(message);
+/** 确认浮层（应用内样式化对话框，异步）。 */
+export function confirmDialog(message, opts = {}) {
+  return askConfirm({ title: opts.title || '请确认', message, ...opts });
+}
+
+/** 复制到剪贴板（Clipboard API 不可用时降级 execCommand）。 */
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
+/** 复制 vault 相对路径并提示结果（右键菜单/状态栏共用）。 */
+export async function copyPath(path) {
+  const ok = await copyText(path);
+  toast(ok ? `路径已复制：${path}` : '复制失败：剪贴板不可用', ok ? 'success' : 'error', 1800);
+}
+
+/** 保存状态文案 → 语义 kind（状态圆点着色用）。 */
+export function saveStateKind(text) {
+  if (!text) return '';
+  if (text.startsWith('已保存')) return 'saved';
+  if (text === '保存失败') return 'error';
+  return 'editing';
 }
 
 /** 字数统计（中文按字、英文按词）。 */
@@ -84,3 +122,33 @@ export function wordCount(text) {
 
 export function $(sel, root = document) { return root.querySelector(sel); }
 export function $all(sel, root = document) { return Array.from(root.querySelectorAll(sel)); }
+
+/**
+ * 绑定"选择文件夹"按钮（仅 pywebview 桥可用时显示；纯浏览器拿不到绝对路径，保持隐藏）。
+ * 选定后写入 inputId 对应输入框。
+ */
+export function bindFolderPicker(btnId, inputId) {
+  let tries = 0;
+  const tryBind = () => {
+    const api = window.pywebview && window.pywebview.api;
+    if (api && typeof api.pick_folder === 'function') {
+      const btn = document.getElementById(btnId);
+      const input = document.getElementById(inputId);
+      if (!btn || !input) return;
+      btn.classList.remove('hidden');
+      btn.addEventListener('click', async () => {
+        try {
+          const path = await api.pick_folder();
+          if (path) {
+            input.value = path;
+            input.dispatchEvent(new Event('change'));
+            input.focus();
+          }
+        } catch { /* 用户取消或桥异常：忽略 */ }
+      });
+    } else if (tries++ < 12) {
+      setTimeout(tryBind, 300);  // pywebview 桥异步注入，最多等 ~3.6s
+    }
+  };
+  tryBind();
+}

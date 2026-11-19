@@ -43,6 +43,9 @@ async def vault_open(req: VaultOpenRequest):
     service = deps.init_services(root, open_now=True)
     hub.bind_eventbus()  # EventBus 随 vault 重建，WS 出口重新订阅
     service.start_watcher()
+    # F2：切换 vault 后启动自动推送（补推 + 定时器）；内部 daemon 线程非阻塞
+    from app.api.routes_autopush import start_autopush
+    start_autopush()
     return {"code": 0, "data": service.info(), "message": "ok"}
 
 

@@ -1,0 +1,427 @@
+/* ============ Kwey 开屏：拉链动画 + 登录（解锁知识库） ============
+   编排时序（总 ~2.7s，respect prefers-reduced-motion）：
+   0.00s 品牌字标淡入
+   0.35s 拉头沿对角线起滑（1.7s 匀速），链齿依次分离（每齿 delay 与拉头同步）
+   2.05s 拉头坠落离场，裂缝光晕最亮
+   2.15s 两半遮罩沿裂缝法向滑出 + 淡出（0.6s）
+   2.30s 登录界面 staggered 入场（60-120ms 错峰）
+   ================================================================ */
+
+/* ---------------- 开屏遮罩层 ---------------- */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  pointer-events: all;
+}
+/* 两半遮罩：沿对角线 (100% 0)→(0 100%) 分割视口 */
+.splash__half {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(70rem 46rem at 82% -6%, rgba(76, 141, 255, 0.10), transparent 58%),
+    radial-gradient(54rem 40rem at 0% 108%, rgba(53, 201, 166, 0.10), transparent 55%),
+    #0e1116;
+}
+.splash__half--a { clip-path: polygon(100% 0, 0 0, 0 100%); }
+.splash__half--b { clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+
+/* 品牌字标（独立层，随遮罩淡出）——放右下三角区，避开对角线裂缝 */
+.splash__brand {
+  position: absolute;
+  left: 62%;
+  top: 67%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #f0f4f9;
+  animation: splash-brand-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+}
+.splash__brand-word {
+  font-size: clamp(44px, 6vw, 72px);
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  margin-right: -0.42em; /* 抵消末字符字距，保持光学居中 */
+  line-height: 1;
+}
+.splash__brand-sub {
+  margin-top: 18px;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.5em;
+  margin-right: -0.5em;
+  text-transform: uppercase;
+  color: rgba(240, 244, 249, 0.38);
+  font-variant-numeric: tabular-nums;
+}
+/* 交互提示：呼吸闪烁，开拖后淡出 */
+.splash__tip {
+  margin-top: 14px;
+  font-size: var(--fs-sm);
+  color: rgba(240, 244, 249, 0.55);
+  letter-spacing: 0.12em;
+  animation: tip-breathe 2.2s ease-in-out 0.9s infinite;
+  transition: opacity 0.4s ease;
+}
+.splash__tip.is-read { opacity: 0; animation: none; }
+@keyframes tip-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+.splash__brand-rule {
+  width: 56px;
+  height: 1px;
+  margin: 22px auto 0;
+  background: linear-gradient(90deg, transparent, rgba(240, 244, 249, 0.5), transparent);
+}
+@keyframes splash-brand-in {
+  from { opacity: 0; transform: translate(-50%, -46%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+/* 拉链层：JS 计算角度并定位（右上→左下） */
+.splash__zip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 200vmax;
+  height: 76px;
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+.splash__zip svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+/* 齿分离过渡（交互式：JS 只翻转状态，动画交给 CSS） */
+#teeth-top rect, #teeth-bottom rect {
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 裂缝光带：拉链下方的强调色微光 */
+.splash__glow {
+  position: absolute;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  filter: blur(5px);
+  opacity: 0;
+  transform-origin: 0 50%;
+}
+
+/* 拉头坠落（JS 触发 WAAPI 时不使用本动画） */
+@keyframes zip-pull {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--zip-len, 1800px)); }
+}
+
+/* 两半滑出（JS 加 .is-open 后触发） */
+.splash.is-open .splash__half--a {
+  animation: half-a-out 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.splash.is-open .splash__half--b {
+  animation: half-b-out 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.splash.is-open .splash__brand {
+  animation: splash-brand-out 0.4s ease both;
+}
+@keyframes half-a-out {
+  to { transform: translate(-9vmax, -9vmax); opacity: 0; }
+}
+@keyframes half-b-out {
+  to { transform: translate(9vmax, 9vmax); opacity: 0; }
+}
+@keyframes splash-brand-out {
+  to { opacity: 0; }
+}
+
+/* ---------------- 登录（解锁）界面：品牌深底 + 氛围 ---------------- */
+.login {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: #0e1116;
+  display: flex;
+  align-items: stretch;
+  opacity: 1;
+  transition: opacity 0.45s ease, visibility 0.45s;
+}
+.login.is-done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 氛围层：渐变网格 + 噪点（本地 data-URI，无外网依赖） */
+.login::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(64rem 44rem at 88% -8%, rgba(76, 141, 255, 0.16), transparent 58%),
+    radial-gradient(50rem 38rem at 4% 104%, rgba(53, 201, 166, 0.14), transparent 55%),
+    radial-gradient(36rem 30rem at 55% 45%, rgba(94, 120, 168, 0.07), transparent 60%);
+}
+.login::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 非对称两栏：左品牌区 / 右表单区 */
+.login__aside {
+  flex: 1.1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 48px 56px;
+  color: #f0f4f9;
+  position: relative;
+  border-right: 1px solid rgba(240, 244, 249, 0.08);
+}
+.login__main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 40px;
+  position: relative;
+}
+
+/* 左侧品牌叙事 */
+.login__wordmark {
+  font-size: clamp(40px, 4.6vw, 60px);
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  margin-right: -0.42em;
+  line-height: 1;
+}
+.login__tagline {
+  margin-top: 16px;
+  font-size: var(--fs-md);
+  color: rgba(240, 244, 249, 0.55);
+  letter-spacing: 0.08em;
+}
+.login__meta {
+  margin-top: 40px;
+  display: flex;
+  gap: 26px;
+  font-size: var(--fs-xs);
+  color: rgba(240, 244, 249, 0.34);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.login__meta b { color: rgba(240, 244, 249, 0.62); font-weight: 600; }
+/* 装饰：左上角四角括号（破格元素） */
+.login__corner {
+  position: absolute;
+  left: 28px;
+  top: 28px;
+  width: 26px;
+  height: 26px;
+  border-left: 1px solid rgba(240, 244, 249, 0.3);
+  border-top: 1px solid rgba(240, 244, 249, 0.3);
+}
+.login__corner::after {
+  content: "";
+  position: absolute;
+  right: -76px;
+  top: 0;
+  width: 75px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(240, 244, 249, 0.3), transparent);
+}
+
+/* 右侧表单 */
+.login__form {
+  width: min(380px, 88%);
+}
+/* 登录/注册分段页签（同心圆角：外 8 + padding 3 = 内 5） */
+.login__tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 22px;
+  background: rgba(240, 244, 249, 0.06);
+  border: 1px solid rgba(240, 244, 249, 0.14);
+  border-radius: 8px;
+}
+.login__tab {
+  padding: 5px 20px;
+  min-height: 32px;
+  border: none;
+  background: transparent;
+  color: rgba(240, 244, 249, 0.5);
+  font-size: var(--fs-sm);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.login__tab:hover { color: rgba(240, 244, 249, 0.85); }
+.login__tab--active {
+  background: rgba(240, 244, 249, 0.13);
+  color: #f0f4f9;
+  font-weight: 600;
+}
+.login__tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 页签内容切换入场 */
+.login__pane { animation: pane-in 0.2s ease; }
+@keyframes pane-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.login__pane code {
+  padding: 1px 5px;
+  background: rgba(240, 244, 249, 0.08);
+  border-radius: var(--radius-sm);
+  font-family: Consolas, monospace;
+  font-size: 0.9em;
+  color: rgba(240, 244, 249, 0.7);
+}
+.login__form h1 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: #f0f4f9;
+  letter-spacing: 0.04em;
+}
+.login__form .login__lead {
+  margin: 8px 0 30px;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: rgba(240, 244, 249, 0.5);
+}
+.login__field { margin-bottom: 18px; }
+.login__field label {
+  display: block;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(240, 244, 249, 0.45);
+  margin-bottom: 8px;
+}
+.login__field-row { display: flex; gap: 10px; }
+.login__field-row input { flex: 1; min-width: 0; }
+.login__pick {
+  flex: none;
+  padding: 0 16px;
+  min-height: 40px;
+  font-size: var(--fs-sm);
+  color: rgba(240, 244, 249, 0.78);
+  background: rgba(240, 244, 249, 0.04);
+  border: 1px solid rgba(240, 244, 249, 0.16);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
+}
+.login__pick:hover { border-color: rgba(240, 244, 249, 0.34); color: #f0f4f9; background: rgba(240, 244, 249, 0.07); }
+.login__pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.login__field input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  font-size: var(--fs-sm);
+  background: rgba(240, 244, 249, 0.05);
+  border: 1px solid rgba(240, 244, 249, 0.16);
+  border-radius: var(--radius-md);
+  color: #f0f4f9;
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+.login__field input::placeholder { color: rgba(240, 244, 249, 0.28); }
+.login__field input:hover { border-color: rgba(240, 244, 249, 0.3); }
+.login__field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(240, 244, 249, 0.07);
+  box-shadow: 0 0 0 3px var(--accent-faint);
+}
+.login__submit {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 6px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.login__submit:hover { background: var(--accent-hover); box-shadow: 0 8px 24px var(--accent-faint); }
+.login__submit:active { transform: translateY(1px); }
+.login__submit:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.login__submit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.login__hint {
+  margin-top: 22px;
+  font-size: var(--fs-xs);
+  color: rgba(240, 244, 249, 0.35);
+}
+.login__hint kbd {
+  background: rgba(240, 244, 249, 0.08);
+  border-color: rgba(240, 244, 249, 0.18);
+  color: rgba(240, 244, 249, 0.6);
+}
+.login__skip {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font: inherit;
+  color: rgba(240, 244, 249, 0.55);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.login__skip:hover { color: #f0f4f9; }
+.login__skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.login__status {
+  margin-top: 10px;
+  min-height: 18px;
+  font-size: var(--fs-xs);
+  color: #ff8a8a;
+}
+
+/* 登录层入场序列（.in 触发，60-120ms 错峰） */
+.login .reveal {
+  opacity: 0;
+  transform: translateY(22px);
+}
+.login.in .reveal {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.login.in .reveal:nth-child(1), .login.in .reveal--d1 { transition-delay: 0.05s; }
+.login.in .reveal--d2 { transition-delay: 0.15s; }
+.login.in .reveal--d3 { transition-delay: 0.24s; }
+.login.in .reveal--d4 { transition-delay: 0.33s; }
+
+/* ---------------- 窄屏适配 ---------------- */
+@media (max-width: 860px) {
+  .login { flex-direction: column; }
+  .login__aside {
+    flex: none;
+    padding: 40px 32px 30px;
+    border-right: none;
+    border-bottom: 1px solid rgba(240, 244, 249, 0.08);
+  }
+  .login__meta { margin-top: 22px; }
+  .login__main { flex: 1; padding: 32px 24px; }
+}
+
+/* ---------------- 降级：reduce 关闭全部动效 ---------------- */
+@media (prefers-reduced-motion: reduce) {
+  .splash__brand { animation: none; }
+  .splash.is-open .splash__half--a,
+  .splash.is-open .splash__half--b,
+  .splash.is-open .splash__brand { animation-duration: 0.01s; }
+  .login .reveal { opacity: 1; transform: none; }
+  .login.in .reveal { transition: none; }
+}

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Optional
@@ -20,8 +21,10 @@ from app.index.linkgraph import LinkGraph
 from app.paths import AppPaths
 from app.vault.links import LinkRewriter
 from app.vault.service import VaultService
+from app.vault.snapshots import SnapshotService
 from app.vault.watcher import VaultWatcher
 
+logger = logging.getLogger("kwey.deps")
 _lock = threading.RLock()
 
 vault_service: Optional[VaultService] = None
@@ -32,6 +35,7 @@ vault_indexer: Optional[Indexer] = None
 vault_linkgraph: Optional[LinkGraph] = None
 vault_watcher: Optional[VaultWatcher] = None
 vault_rewriter: Optional[LinkRewriter] = None
+vault_snapshots: Optional[SnapshotService] = None
 
 
 def init_services(root: Path, open_now: bool = True) -> VaultService:
@@ -43,6 +47,7 @@ def init_services(root: Path, open_now: bool = True) -> VaultService:
     """
     global vault_service, vault_config, vault_eventbus, vault_db
     global vault_indexer, vault_linkgraph, vault_watcher, vault_rewriter
+    global vault_snapshots
 
     with _lock:
         reset_services()
@@ -58,12 +63,26 @@ def init_services(root: Path, open_now: bool = True) -> VaultService:
         watcher = VaultWatcher(service)
         service.bind_watcher(watcher)
 
+        # M2：git 快照服务。默认关闭，开启时才在 vault 内初始化 .git；
+        # 初始化失败不影响 vault 打开（快照是增强能力，不是事实源）。
+        snap_cfg = cfg.get("snapshots") or {}
+        snapshots = SnapshotService(
+            root, vault=service, enabled=bool(snap_cfg.get("enabled", False))
+        )
+        service.bind_snapshots(snapshots)
+        if snapshots.enabled:
+            try:
+                snapshots.ensure_repo()
+            except Exception:  # noqa: BLE001
+                logger.exception("git 快照初始化失败，已降级为不记录快照")
+
         if open_now:
             service.open_vault()
 
         vault_config, vault_eventbus, vault_db = cfg, bus, db
         vault_indexer, vault_linkgraph = indexer, graph
         vault_service, vault_watcher, vault_rewriter = service, watcher, rewriter
+        vault_snapshots = snapshots
         return service
 
 
@@ -71,6 +90,7 @@ def reset_services() -> None:
     """停止 watcher、关闭数据库连接、清空单例（vault 切换/退出时调用）。"""
     global vault_service, vault_config, vault_eventbus, vault_db
     global vault_indexer, vault_linkgraph, vault_watcher, vault_rewriter
+    global vault_snapshots
 
     with _lock:
         if vault_watcher is not None:
@@ -85,6 +105,7 @@ def reset_services() -> None:
         vault_linkgraph = None
         vault_watcher = None
         vault_rewriter = None
+        vault_snapshots = None
 
 
 def _require(name: str, value):
@@ -143,3 +164,26 @@ def require_linkgraph() -> LinkGraph:
 
 def get_watcher() -> Optional[VaultWatcher]:
     return vault_watcher
+
+
+def get_snapshots() -> Optional[SnapshotService]:
+    return vault_snapshots
+
+
+def require_snapshots() -> SnapshotService:
+    """快照单例 + 运行时刷新（设置开关 / bind_vault / 补初始化 repo）。
+
+    原 routes_history._get_snapshot 的按 root 缓存收口到此：init_services
+    重建服务族时单例自然更替，无需独立缓存。enabled 以 settings 为准
+    （缺省关闭，不擅自 git init 用户 vault），支持设置页运行时开启。
+    """
+    svc = _require("SnapshotService", vault_snapshots)
+    vault = require_vault()
+    svc.bind_vault(vault)
+    cfg = get_config()
+    raw = cfg.get("snapshots") if cfg is not None else None
+    enabled = bool(raw.get("enabled", False)) if isinstance(raw, dict) else False
+    svc.enabled = enabled
+    if enabled and not (svc.root / ".git").exists():
+        svc.ensure_repo()
+    return svc

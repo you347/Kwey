@@ -31,6 +31,7 @@ function renderTree(nodes, container) {
     wrap.className = 'tag-tree__node';
     const row = document.createElement('div');
     row.className = `tag-row${node.name === activeTag ? ' tag-row--active' : ''}`;
+    row.dataset.tag = node.name;
     row.innerHTML = `<span class="tag-row__name">#${escapeName(node.name)}</span>` +
       `<span class="tag-row__count">${node.count}</span>`;
     row.addEventListener('click', () => selectTag(node.name, wrap));
@@ -43,6 +44,13 @@ function renderTree(nodes, container) {
     }
     container.appendChild(wrap);
   }
+}
+
+/** 预览内点击 #标签 → 高亮标签面板对应行并展开笔记列表。 */
+export function filterByTag(tag) {
+  if (!panelEl || !tag) return;
+  const row = [...panelEl.querySelectorAll('.tag-row')].find((el) => el.dataset.tag === tag);
+  if (row) row.click();
 }
 
 /** 选中标签 → 拉取笔记列表展示（frontmatter 与行内标签合并）。 */

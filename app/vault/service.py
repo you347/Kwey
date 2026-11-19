@@ -13,7 +13,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -30,6 +33,7 @@ from app.parser import frontmatter as fm_mod
 from app.parser.wikilink import parse_wikilink_text, split_anchor
 from app.paths import (
     AppPaths,
+    ILLEGAL_FILENAME_CHARS,
     PathError,
     is_ignored,
     normalize_rel,
@@ -39,6 +43,9 @@ from app.paths import (
 from app.vault.links import LinkRewriter
 
 MARKDOWN_EXTS = {".md", ".markdown"}
+TRASH_ROOT = ".trash"  # 回收站根目录（vault 相对，IGNORED_DIRS 内）
+
+logger = logging.getLogger("kwey.vault")
 
 
 def _validate(rel: str) -> str:
@@ -72,10 +79,35 @@ class VaultService:
         self.lock = threading.RLock()
         self.recent_self_writes: Dict[str, float] = {}
         self._watcher = None  # 由 deps 装配；start_watcher/stop_watcher 转发
+        self._snapshots = None  # M2 git 快照服务，由 deps 装配
 
     # ------------------------------------------------------------------ lifecycle
     def bind_watcher(self, watcher) -> None:
         self._watcher = watcher
+
+    def bind_snapshots(self, snapshots) -> None:
+        """注入 M2 git 快照服务（可选能力，关闭时不影响主写路径）。"""
+        self._snapshots = snapshots
+
+    def _auto_snapshot(self, action: str, rel: str = "") -> None:
+        """统一写路径的快照挂钩：写盘成功后按设置生成 commit。
+
+        快照只是增强能力，任何失败都只记日志，绝不阻断笔记写入。
+        ``enabled`` 每次从 settings 实时读取，支持设置页运行时开关。
+        """
+        svc = self._snapshots
+        cfg = self.config.get("snapshots") or {}
+        if svc is None or not cfg.get("enabled", False):
+            return
+        if not cfg.get("auto_commit", True):
+            return
+        try:
+            svc.enabled = True
+            if not (svc.root / ".git").exists():
+                svc.ensure_repo()
+            svc.commit(f"{action}: {rel}" if rel else action)
+        except Exception:  # noqa: BLE001
+            logger.warning("git 快照失败（不影响写盘）: %s %s", action, rel, exc_info=True)
 
     def start_watcher(self) -> None:
         if self._watcher is not None:
@@ -186,6 +218,7 @@ class VaultService:
             meta = self.db.get_note(rel) or {}
             meta["path"] = rel
             meta["title"] = str(fm.get("title") or title)
+            self._auto_snapshot("create", rel)
             return meta
 
     # ------------------------------------------------------------------ write
@@ -220,6 +253,7 @@ class VaultService:
             self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))
             if links_changed:
                 self.eventbus.publish(VaultEvent(EventType.LINKS_CHANGED, path=rel))
+            self._auto_snapshot("update", rel)
             return {
                 "updated": True,
                 "links_changed": links_changed,
@@ -240,6 +274,7 @@ class VaultService:
                 self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))
                 if links_changed:
                     self.eventbus.publish(VaultEvent(EventType.LINKS_CHANGED, path=rel))
+            self._auto_snapshot("update", rel)
             return True
 
     # ------------------------------------------------------------------ move/rename
@@ -288,6 +323,7 @@ class VaultService:
             )
             if rewritten or revived:
                 self.eventbus.publish(VaultEvent(EventType.LINKS_CHANGED, path=new_rel, old_path=rel))
+            self._auto_snapshot("move", new_rel)
             return {"new_path": new_rel, "rewritten_links": rewritten + revived}
 
     # ------------------------------------------------------------------ delete
@@ -308,6 +344,7 @@ class VaultService:
             self._mark_self_write(trash_rel)
             self.indexer.remove_note(rel, break_links=True)
             self.eventbus.publish(VaultEvent(EventType.DELETED, path=rel))
+            self._auto_snapshot("delete", rel)
             return trash_rel
 
     def delete_dir(self, rel: str, confirm: bool = False) -> str:
@@ -350,7 +387,193 @@ class VaultService:
                     self.indexer.remove_file_entry(child_rel)
                 self.eventbus.publish(VaultEvent(EventType.DELETED, path=child_rel))
             self.eventbus.publish(VaultEvent(EventType.DELETED, path=rel))
+            self._auto_snapshot("delete-dir", rel)
             return trash_rel
+
+    # ------------------------------------------------------------------ trash
+    # 回收站读写统一走「root / rel 直拼绝对路径 + os.replace」，与 delete_note 一致：
+    # validate_relative 会拒绝含 .trash 片段的 API 路径（QA B2 修复），故此处
+    # 自行逐段安全校验，绝不复用 validate_relative。
+    def _trash_abs(self, trash_path: str) -> tuple[str, Path]:
+        """校验 .trash/ 内路径 → (rel, abs_path)；越界/非法一律 400。"""
+        rel = normalize_rel(trash_path)
+        if not rel.startswith(TRASH_ROOT + "/") or rel == TRASH_ROOT:
+            raise HTTPException(status_code=400, detail="路径必须位于 .trash/ 内")
+        for part in rel.split("/"):
+            if part in ("", ".", ".."):
+                raise HTTPException(status_code=400, detail=f"非法路径片段: {part!r}")
+            if part in (".kwey", ".git"):
+                raise HTTPException(status_code=400, detail=f"禁止穿越到保留目录: {part!r}")
+            if ":" in part or any(c in ILLEGAL_FILENAME_CHARS for c in part):
+                raise HTTPException(status_code=400, detail=f"路径含非法字符: {part!r}")
+            if re.search(r"[\x00-\x1f]", part):
+                raise HTTPException(status_code=400, detail="路径含控制字符")
+        root = self.paths.ensure_root()
+        abs_path = (root / rel).resolve()
+        trash_root = (root / TRASH_ROOT).resolve()
+        try:
+            abs_path.relative_to(trash_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="路径越出回收站") from exc
+        return rel, abs_path
+
+    def _dest_abs(self, dest_rel: str) -> Path:
+        """恢复目标：root / rel 直拼 + 越界校验（不套 IGNORED_DIRS 限制）。"""
+        rel = normalize_rel(dest_rel)
+        for part in rel.split("/"):
+            if part in ("", ".", ".."):
+                raise HTTPException(status_code=400, detail=f"非法恢复目标片段: {part!r}")
+            if ":" in part or any(c in ILLEGAL_FILENAME_CHARS for c in part):
+                raise HTTPException(status_code=400, detail=f"恢复目标含非法字符: {part!r}")
+            if re.search(r"[\x00-\x1f]", part):
+                raise HTTPException(status_code=400, detail="恢复目标含控制字符")
+        root = self.paths.ensure_root()
+        abs_path = (root / rel).resolve()
+        try:
+            abs_path.relative_to(root.resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="恢复目标越出 vault") from exc
+        return abs_path
+
+    def _prune_empty_trash_dirs(self, start: Path) -> None:
+        """恢复/永久删除后自底向上清理 .trash/ 内空目录（到 .trash 根为止）。"""
+        root = self.paths.ensure_root()
+        trash_root = (root / TRASH_ROOT).resolve()
+        if start.is_dir():
+            for d in sorted(start.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if d.is_dir():
+                    try:
+                        d.rmdir()  # 仅空目录可删
+                    except OSError:
+                        pass
+        cur = start.resolve()
+        while cur != trash_root:
+            try:
+                cur.rmdir()
+            except OSError:
+                break
+            try:
+                cur.parent.relative_to(trash_root)
+            except ValueError:
+                break
+            cur = cur.parent
+
+    def list_trash(self) -> List[Dict[str, Any]]:
+        """列出 .trash/ 顶层条目（文件/目录），按 mtime 倒序。
+
+        original_path = 去掉 .trash/ 前缀（保留子目录结构）。目录条目可整体
+        恢复/永久删除；恢复目录时按其内部文件逐一映射回原子路径重索引。
+        """
+        root = self.paths.ensure_root()
+        trash_root = root / TRASH_ROOT
+        items: List[Dict[str, Any]] = []
+        if not trash_root.is_dir():
+            return items
+        for p in trash_root.iterdir():
+            if p.name.endswith(".kwey-tmp"):
+                continue
+            try:
+                rel = self.paths.to_rel(p)
+            except Exception:  # noqa: BLE001
+                continue
+            original = (
+                rel[len(TRASH_ROOT) + 1:]
+                if rel.startswith(TRASH_ROOT + "/") else p.name
+            )
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            items.append({
+                "trash_path": rel,
+                "original_path": original,
+                "name": p.name,
+                "is_dir": p.is_dir(),
+                "mtime": mtime,
+            })
+        items.sort(key=lambda x: x["mtime"], reverse=True)
+        return items
+
+    def _restore_one(self, src_abs: Path, dest_rel: str) -> int:
+        """移动单个文件回 vault → 增量索引 → 复活链接 → 广播 CREATED。"""
+        dest_abs = self._dest_abs(dest_rel)
+        dest_abs.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(src_abs, dest_abs)
+        self._mark_self_write(dest_rel)
+        self.indexer.reindex_note(dest_rel)
+        self._auto_snapshot("restore", dest_rel)
+        revived = self.indexer.revive_for(dest_rel)
+        self.eventbus.publish(VaultEvent(EventType.CREATED, path=dest_rel))
+        if revived:
+            self.eventbus.publish(VaultEvent(EventType.LINKS_CHANGED, path=dest_rel))
+        return revived
+
+    def restore_from_trash(self, trash_path: str, target_path: Optional[str] = None) -> Dict[str, Any]:
+        """从 .trash/ 恢复：目标已存在自动去重、不覆盖；目录恢复逐文件重索引。"""
+        with self.lock:
+            trash_rel, src_abs = self._trash_abs(trash_path)
+            if not src_abs.exists():
+                raise HTTPException(status_code=404, detail=f"回收站条目不存在: {trash_rel}")
+            original = trash_rel[len(TRASH_ROOT) + 1:]
+            base = normalize_rel(target_path) if target_path else original
+            if base.split("/")[0] in (".trash", ".kwey", ".git"):
+                raise HTTPException(status_code=400, detail="恢复目标不可位于系统保留目录")
+            root = self.paths.ensure_root()
+            revived_total = 0
+
+            if src_abs.is_dir():
+                # 逐文件恢复到各自原路径：目标目录已存在时只给冲突文件去重，
+                # 不能把整个目录改名（否则删除子目录内单篇笔记后恢复不到原位置）。
+                children = [
+                    c for c in sorted(src_abs.rglob("*"))
+                    if c.is_file() and not c.name.endswith(".kwey-tmp")
+                ]
+                for child in children:
+                    sub = child.relative_to(src_abs).as_posix()
+                    dest_rel = AppPaths.unique_path(
+                        f"{base}/{sub}", exists_fn=lambda p: (root / p).exists()
+                    )
+                    revived_total += self._restore_one(child, dest_rel)
+                self._prune_empty_trash_dirs(src_abs)
+                return_path = base
+            else:
+                dest_rel = AppPaths.unique_path(base, exists_fn=lambda p: (root / p).exists())
+                revived_total += self._restore_one(src_abs, dest_rel)
+                self._prune_empty_trash_dirs(src_abs.parent)
+                return_path = dest_rel
+
+            return {"path": return_path, "rewritten_links": revived_total}
+
+    def purge_trash_path(self, trash_path: str) -> int:
+        """永久删除回收站单条（真实 unlink/rmtree）。返回删除条目数。"""
+        with self.lock:
+            trash_rel, abs_path = self._trash_abs(trash_path)
+            if not abs_path.exists():
+                raise HTTPException(status_code=404, detail=f"回收站条目不存在: {trash_rel}")
+            if abs_path.is_dir():
+                shutil.rmtree(abs_path)
+            else:
+                abs_path.unlink()
+            self._prune_empty_trash_dirs(abs_path.parent)
+            return 1
+
+    def purge_trash_all(self) -> int:
+        """清空 .trash/ 全部条目（真实删除）。返回删除的顶层条目数。"""
+        with self.lock:
+            root = self.paths.ensure_root()
+            trash_root = root / TRASH_ROOT
+            if not trash_root.is_dir():
+                return 0
+            count = 0
+            for p in list(trash_root.iterdir()):
+                if p.name.endswith(".kwey-tmp"):
+                    continue
+                if p.is_dir():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+                count += 1
+            return count
 
     # ------------------------------------------------------------------ dirs
     def create_dir(self, rel: str) -> str:

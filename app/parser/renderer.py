@@ -147,3 +147,40 @@ def render_markdown(
     html = _MD.render(processed)
     html = _postprocess_images(html)
     return html
+
+
+# ---------------------------------------------------------------- 聊天回复渲染
+# 独立实例，html=False：模型输出不可信，禁止透传原始 HTML（_MD 的 html=True 只服务
+# wikilink 注入的预览链路）。也不调用 _preprocess()——它产出的是 HTML 片段，
+# 在 html=False 下会被转义成字面量文本，反而破坏输出。
+_CHAT_MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable(
+    ["table", "strikethrough"]
+)
+
+_ANCHOR_RE = re.compile(r"<a\s+([^>]*?)>", re.IGNORECASE)
+_HREF_RE = re.compile(r'href="([^"]*)"', re.IGNORECASE)
+
+
+def _externalize_links(html: str) -> str:
+    """仅 http(s) 外链补 target/rel；相对链接与 javascript: 等保持原样。"""
+
+    def _sub(m: re.Match) -> str:
+        attrs = m.group(1)
+        if "target=" in attrs:
+            return m.group(0)
+        href = _HREF_RE.search(attrs)
+        if not href or not re.match(r"^https?://", href.group(1), re.IGNORECASE):
+            return m.group(0)
+        return f'<a {attrs} target="_blank" rel="noopener noreferrer">'
+
+    return _ANCHOR_RE.sub(_sub, html)
+
+
+def render_chat_markdown(text: str) -> str:
+    """聊天回复 Markdown → 安全 HTML。
+
+    与 render_markdown 的区别：不解析 wikilink/行内标签、不做附件路径重写，
+    只处理「模型输出」这一种不可信文本（表格/删除线/自动链接可用）。
+    """
+    html = _CHAT_MD.render(text or "")
+    return _externalize_links(html)

@@ -13,15 +13,18 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import __version__
 from app.api import deps
 from app.api.ws import hub
 from app.paths import PathError
+from app.runtime import resource_root
 
 logger = logging.getLogger("kwey.server")
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+# 冻结包内 static/ 随包解压到 _MEIPASS，源码运行即项目根；两种形态统一由 runtime 解析。
+STATIC_DIR = resource_root() / "static"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = resource_root()
 
 
 def _ok(code: int, data=None, message: str = "ok") -> JSONResponse:
@@ -49,12 +52,15 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
                 hub.bind_eventbus()
                 if start_watcher:
                     deps.get_vault().start_watcher()
+                # F2：启动补推 + 排定定时器（内部 daemon 线程，非阻塞）
+                start_autopush()
         else:
             hub.bind_eventbus()
         yield
+        stop_autopush()   # F2：停掉自动推送定时器，避免退出后残留线程
         deps.reset_services()
 
-    app = FastAPI(title="Kwey", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Kwey", version=__version__, lifespan=lifespan)
 
     # ---------------------------------------------------------- 统一响应包装
     @app.exception_handler(StarletteHTTPException)
@@ -90,7 +96,31 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     from app.api.routes_files import router as files_router
     from app.api.routes_search import router as search_router
     from app.api.routes_graph import router as graph_router
+    from app.api.routes_trash import router as trash_router
+    from app.api.routes_templates import router as templates_router
+    from app.api.routes_export import router as export_router
     from app.api.ws import router as ws_router
+    # ---- M2 Agent Link（四卡并行产出，统一在此注册） ----
+    from app.api.routes_agent import router as agent_router
+    from app.api.routes_organize import router as organize_router
+    from app.api.routes_history import router as history_router
+    from app.api.routes_provider import router as provider_router
+    from app.api.routes_pulse import router as pulse_router
+    from app.api.routes_chat import router as chat_router
+    # ---- Wave A 并行卡（A4-A8）：编译 / 记忆 / 上下文 ----
+    from app.api.routes_compile import router as compile_router
+    from app.api.routes_memory import router as memory_router
+    from app.api.routes_context import router as context_router
+    from app.api.routes_autopush import router as autopush_router
+    from app.api.routes_autopush import start_autopush, stop_autopush
+    # ---- Wave A 第二批（C1-C6）：Canvas / 周期 / 插件 / 主题 / RAG / 复习 / 剪藏 ----
+    from app.api.routes_canvas import router as canvas_router
+    from app.api.routes_periodic import router as periodic_router
+    from app.api.routes_plugins import router as plugins_router
+    from app.api.routes_theme import router as theme_router
+    from app.api.routes_rag import router as rag_router
+    from app.api.routes_review import router as review_router
+    from app.api.routes_clip import router as clip_router
 
     app.include_router(system_router)
     app.include_router(static_router)
@@ -98,9 +128,37 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     app.include_router(files_router)
     app.include_router(search_router)
     app.include_router(graph_router)
+    app.include_router(trash_router)
+    app.include_router(templates_router)
+    app.include_router(export_router)
     app.include_router(ws_router)
+    app.include_router(agent_router)
+    app.include_router(organize_router)
+    app.include_router(history_router)
+    app.include_router(provider_router)
+    app.include_router(pulse_router)
+    app.include_router(chat_router)
+    app.include_router(compile_router)
+    app.include_router(memory_router)
+    app.include_router(context_router)
+    app.include_router(autopush_router)   # F2 每日自动推送
+    app.include_router(canvas_router)
+    app.include_router(periodic_router)
+    app.include_router(plugins_router)
+    app.include_router(theme_router)
+    app.include_router(rag_router)
+    app.include_router(review_router)
+    app.include_router(clip_router)
 
     # ---------------------------------------------------------- 静态托管
+    @app.middleware("http")
+    async def _no_cache_static(request: Request, call_next):
+        """本地软件随版本更新 JS/CSS：静态资源禁强缓存，避免浏览器显示旧界面。"""
+        response = await call_next(request)
+        if request.url.path.startswith("/static/") or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

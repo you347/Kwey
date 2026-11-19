@@ -2,7 +2,12 @@
 
 - 消息即 VaultEvent.to_dict()：{"event","path","old_path","ts"}。
 - 心跳：服务端 25s 无事件时发 {"event":"ping"}；客户端可发 "ping" 收 {"event":"pong"}。
-- M2 预留：届时在握手处加 token 鉴权字段位。
+- A4 遗留落地（握手鉴权）：query 带 ``?token=`` 时严格校验三级 token；
+  无效/过期 → close 4401（401）、权限不足 → close 4403（403）。未带 token 的
+  本地回环连接（127.0.0.1 / ::1 / localhost / testclient）放行——本地 UI 的
+  connectWS() 不带 token，且 M1 既有 WS 行为不得破坏；非回环且无 token →
+  close 4401。安全边界：WS 仅广播事件元数据（path/old_path/ts），不含正文；
+  外部 Agent 若要读正文须走带 token 的 REST/SSE（全端点已鉴权）。
 """
 
 from __future__ import annotations
@@ -12,9 +17,10 @@ import logging
 import time
 from typing import Optional, Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from app.api import deps
+from app.api.guard import verify_ws_token
 from app.events import EventBus, VaultEvent
 
 logger = logging.getLogger("kwey.ws")
@@ -22,6 +28,8 @@ logger = logging.getLogger("kwey.ws")
 router = APIRouter(tags=["ws"])
 
 HEARTBEAT_INTERVAL = 25.0
+# 本地回环主机名（TestClient 用 "testclient"；本机浏览器用 localhost/127.0.0.1/::1）
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
 class WsHub:
@@ -92,7 +100,35 @@ class WsHub:
 hub = WsHub()
 
 
+async def _reject_ws(websocket: WebSocket, code: int, message: str) -> None:
+    """拒绝握手：accept 后发一帧 error 再 close（便于客户端读到原因），不等 receive。"""
+    await websocket.accept()
+    try:
+        await websocket.send_json({"event": "error", "code": code, "message": message})
+    except (RuntimeError, WebSocketDisconnect):
+        pass
+    try:
+        await websocket.close(code=4401 if code == 401 else 4403)
+    except RuntimeError:
+        pass
+
+
 @router.websocket("/ws/events")
-async def ws_events(websocket: WebSocket):
+async def ws_events(
+    websocket: WebSocket,
+    token: Optional[str] = Query(default=None, description="可选：agent token；带则严格校验"),
+):
+    """渐进式鉴权：带 token → 严格校验；无 token → 仅本地回环放行。"""
+    if token is not None and token.strip():
+        try:
+            verify_ws_token(token, "read")
+        except HTTPException as exc:
+            await _reject_ws(websocket, exc.status_code, str(exc.detail))
+            return
+    else:
+        client_host = websocket.client.host if websocket.client else ""
+        if client_host not in _LOOPBACK_HOSTS:
+            await _reject_ws(websocket, 401, "远程连接必须提供 ?token=")
+            return
     await websocket.accept()
     await hub.run_client(websocket)

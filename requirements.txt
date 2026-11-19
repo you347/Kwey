@@ -12,3 +12,6 @@ PyYAML>=6.0               # frontmatter 依赖显式声明
 # 开发/测试
 pytest>=8.0.0
 httpx>=0.27.0             # FastAPI TestClient 依赖
+reportlab>=4.0            # PDF 导出引擎（纯 Python，Windows 稳）；format=pdf 依赖它
+# 可选增强：weasyprint>=63 —— HTML 保真度更高的 PDF 引擎，Windows 需额外 GTK 运行库；
+# 不装也能用 format=pdf（走 reportlab 块式排版），或 format=print 浏览器另存。

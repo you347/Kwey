@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -9,58 +9,244 @@
   <link rel="stylesheet" href="/static/css/base.css"/>
   <link rel="stylesheet" href="/static/css/layout.css"/>
   <link rel="stylesheet" href="/static/css/panels.css"/>
+  <link rel="stylesheet" href="/static/css/shell.css"/>
   <link rel="stylesheet" href="/static/css/editor.css"/>
+  <link rel="stylesheet" href="/static/css/splash.css"/>
+  <link rel="stylesheet" href="/static/css/slides.css?v=1"/>
+  <link rel="stylesheet" href="/static/css/settings-ui.css"/>
 </head>
 <body>
+  <!-- ======================= 开屏：拉链解锁 ======================= -->
+  <div id="splash" class="splash" aria-hidden="true">
+    <div class="splash__half splash__half--a"></div>
+    <div class="splash__half splash__half--b"></div>
+    <div class="splash__brand">
+      <div class="splash__brand-word">KWEY</div>
+      <div class="splash__brand-rule"></div>
+      <div class="splash__brand-sub">Personal Knowledge Vault</div>
+      <div id="splash-tip" class="splash__tip">按住拉链头，沿对角线拖到底</div>
+    </div>
+    <div id="splash-glow" class="splash__glow"></div>
+    <div id="splash-zip" class="splash__zip">
+      <svg xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </div>
+
+  <!-- ======================= 登录（解锁知识库） ======================= -->
+  <div id="login" class="login hidden">
+    <div class="login__aside">
+      <div class="login__corner" aria-hidden="true"></div>
+      <div class="login__wordmark reveal">Kwey</div>
+      <p class="login__tagline reveal reveal--d2">磁盘上的 Markdown 文件夹，即唯一事实源。</p>
+      <div class="login__meta reveal reveal--d3">
+        <span><b>Local-first</b> 本地优先</span>
+        <span><b>Agent-native</b> 智能体原生</span>
+      </div>
+    </div>
+    <div class="login__main">
+      <form id="login-form" class="login__form">
+        <div id="login-tabs" class="login__tabs reveal reveal--d2" role="tablist">
+          <button type="button" data-tab="signin" class="login__tab login__tab--active" role="tab">登录</button>
+          <button type="button" data-tab="signup" class="login__tab" role="tab">注册</button>
+        </div>
+
+        <!-- 登录：打开已有知识库 -->
+        <div id="tab-signin" class="login__pane">
+          <h1 class="reveal reveal--d2">解锁你的知识库</h1>
+          <p class="login__lead reveal reveal--d3">选择本地文件夹，Kwey 会为其建立全文索引与知识图谱。</p>
+          <div class="login__field reveal reveal--d3">
+            <label for="login-vault-path">Vault 文件夹</label>
+            <div class="login__field-row">
+              <input id="login-vault-path" type="text" placeholder="选择文件夹，或输入绝对路径如 D:/notes" autocomplete="off" spellcheck="false"/>
+              <button id="login-pick" type="button" class="login__pick hidden">选择文件夹</button>
+            </div>
+          </div>
+          <button id="login-submit" class="login__submit reveal reveal--d4" type="submit">进入知识库</button>
+          <p class="login__hint reveal reveal--d4"><kbd>Enter</kbd> 直接进入 · <button type="button" id="login-skip" class="login__skip">跳过开屏</button></p>
+        </div>
+
+        <!-- 注册：创建新的知识库 -->
+        <div id="tab-signup" class="login__pane hidden">
+          <h1>注册你的知识库</h1>
+          <p class="login__lead">选择一个文件夹（可在对话框中新建），Kwey 将在其中建立 <code>.kwey</code> 索引与知识图谱。</p>
+          <div class="login__field">
+            <label for="signup-path">新 Vault 文件夹</label>
+            <div class="login__field-row">
+              <input id="signup-path" type="text" placeholder="选择文件夹，或输入绝对路径" autocomplete="off" spellcheck="false"/>
+              <button id="signup-pick" type="button" class="login__pick hidden">选择文件夹</button>
+            </div>
+          </div>
+          <button id="signup-submit" class="login__submit" type="submit">创建并进入</button>
+          <p class="login__hint">无需账号 · 数据完全保存在本地磁盘</p>
+        </div>
+
+        <p id="login-status" class="login__status" role="alert"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- SVG 图标库（stroke: currentColor，随主题变色） -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2H3z"/><path d="M3 13h18l-2 7H5z"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.6" cy="7.6" r="1.2"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14"/></symbol>
+    <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="17" r="2.2"/><circle cx="19" cy="17" r="2.2"/><line x1="10.5" y1="7" x2="6.3" y2="15"/><line x1="13.5" y1="7" x2="17.7" y2="15"/><line x1="7.2" y1="17" x2="16.8" y2="17"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></symbol>
+    <symbol id="i-template" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="6" y1="9" x2="6" y2="9"/><line x1="10" y1="9" x2="10" y2="9"/><line x1="14" y1="9" x2="14" y2="9"/><line x1="18" y1="9" x2="18" y2="9"/><line x1="7" y1="14" x2="17" y2="14"/></symbol>
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></symbol>
+    <symbol id="i-panel-right" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16z"/><line x1="14" y1="6" x2="18" y2="10"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+  </svg>
+
   <!-- ======================= 标题栏 ======================= -->
   <header id="titlebar" class="titlebar">
     <div class="titlebar__brand">Kwey <span id="vault-name" class="titlebar__vault"></span></div>
     <div class="titlebar__actions">
-      <button id="btn-theme" class="btn btn--ghost" title="切换主题">🌗 主题</button>
-      <button id="btn-settings" class="btn btn--ghost" title="设置">⚙ 设置</button>
+      <button id="btn-theme" class="btn btn--ghost" title="切换主题">
+        <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg> 主题
+      </button>
+      <button id="btn-settings" class="btn btn--ghost" title="设置">
+        <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg> 设置
+      </button>
     </div>
   </header>
 
-  <!-- ======================= 三栏主区 ======================= -->
+  <!-- ======================= 主区：ribbon + 三栏 ======================= -->
   <div id="layout" class="layout">
-    <!-- 左侧边栏 -->
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar__section sidebar__section--grow">
-        <div class="sidebar__header">
-          <span>文件</span>
-          <span class="sidebar__header-actions">
-            <button id="btn-new-note" class="btn btn--mini" title="新建笔记">＋笔记</button>
-            <button id="btn-new-dir" class="btn btn--mini" title="新建目录">＋目录</button>
-          </span>
-        </div>
-        <div id="filetree" class="filetree" aria-label="文件树"></div>
+    <!-- 左侧 ribbon：图标导航（Obsidian 式） -->
+    <nav id="ribbon" class="ribbon" aria-label="面板导航">
+      <div class="ribbon__group">
+        <button class="ribbon__btn" data-side="left" data-panel="files" title="文件"><svg class="icon"><use href="#i-folder"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="search" title="搜索"><svg class="icon"><use href="#i-search"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="tags" title="标签"><svg class="icon"><use href="#i-tag"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="bookmarks" title="书签"><svg class="icon"><use href="#i-bookmark"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="recent" title="最近文件"><svg class="icon"><use href="#i-clock"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="outline" title="大纲"><svg class="icon"><use href="#i-list"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="trash" title="回收站"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
-      <div class="sidebar__section">
-        <div class="sidebar__header"><span>标签</span></div>
-        <div id="tagpanel" class="tagpanel"></div>
+      <div class="ribbon__spacer"></div>
+      <div class="ribbon__group ribbon__group--right">
+        <button class="ribbon__btn" data-side="right" data-panel="backlinks" title="反向链接"><svg class="icon"><use href="#i-link"/></svg></button>
+        <button class="ribbon__btn" data-side="right" data-panel="graph" title="本地图谱"><svg class="icon"><use href="#i-graph"/></svg></button>
+        <button class="ribbon__btn" data-side="right" data-panel="chat" title="内置智能体"><svg class="icon"><use href="#i-spark"/></svg></button>
+      </div>
+      <div class="ribbon__group ribbon__group--bottom">
+        <button id="sidebar-collapse" class="ribbon__btn" title="折叠/展开左栏"><svg class="icon"><use href="#i-panel-left"/></svg></button>
+        <button id="rightbar-collapse" class="ribbon__btn" title="折叠/展开右栏"><svg class="icon"><use href="#i-panel-right"/></svg></button>
+      </div>
+    </nav>
+
+    <!-- 左侧边栏：多 tab 面板 -->
+    <aside id="sidebar" class="sidebar">
+      <div id="left-tabs" class="panel-tabs" role="tablist">
+        <button data-panel="files" role="tab">文件</button>
+        <button data-panel="search" role="tab">搜索</button>
+        <button data-panel="tags" role="tab">标签</button>
+        <button data-panel="bookmarks" role="tab">书签</button>
+        <button data-panel="recent" role="tab">最近</button>
+        <button data-panel="outline" role="tab">大纲</button>
+        <button data-panel="trash" role="tab">回收站</button>
+      </div>
+      <div class="sidebar__panels">
+        <section id="panel-files" class="panel-view" data-panel="files">
+          <div class="sidebar__header">
+            <span>文件</span>
+            <span class="sidebar__header-actions">
+              <button id="btn-new-note" class="btn btn--mini" title="新建笔记">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> 笔记
+              </button>
+              <button id="btn-new-dir" class="btn btn--mini" title="新建目录">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> 目录
+              </button>
+            </span>
+          </div>
+          <div id="filetree" class="filetree" aria-label="文件树"></div>
+        </section>
+        <section id="panel-search" class="panel-view hidden" data-panel="search">
+          <div class="sidebar__header"><span>搜索</span></div>
+          <div class="panel-search">
+            <input id="panel-search-input" type="text" placeholder="搜索… path: tag: file:" autocomplete="off"/>
+            <div id="panel-search-results" class="panel-search__results"></div>
+          </div>
+        </section>
+        <section id="panel-tags" class="panel-view hidden" data-panel="tags">
+          <div class="sidebar__header"><span>标签</span></div>
+          <div id="tagpanel" class="tagpanel"></div>
+        </section>
+        <section id="panel-bookmarks" class="panel-view hidden" data-panel="bookmarks">
+          <div class="sidebar__header"><span>书签</span><button id="btn-bookmark-add" class="btn btn--mini" title="收藏当前笔记"><svg class="icon"><use href="#i-plus"/></svg></button></div>
+          <div id="bookmark-list" class="panel-list"></div>
+        </section>
+        <section id="panel-recent" class="panel-view hidden" data-panel="recent">
+          <div class="sidebar__header"><span>最近文件</span></div>
+          <div id="recent-list" class="panel-list"></div>
+        </section>
+        <section id="panel-outline" class="panel-view hidden" data-panel="outline">
+          <div class="sidebar__header"><span>大纲</span></div>
+          <div id="outline-list" class="panel-list"></div>
+        </section>
+        <section id="panel-trash" class="panel-view hidden" data-panel="trash">
+          <div class="sidebar__header"><span>回收站</span><button id="btn-trash-purge" class="btn btn--mini" title="清空回收站">清空</button></div>
+          <div id="trash-list" class="panel-list"></div>
+        </section>
       </div>
     </aside>
-    <button id="sidebar-collapse" class="collapse-btn" title="折叠/展开侧栏">«</button>
+    <div id="left-resizer" class="resizer" title="拖动调整左栏宽度"></div>
 
     <!-- 中央编辑区 -->
     <main class="center">
       <div class="tabbar">
         <div id="tabs" class="tabbar__tabs"></div>
-        <button id="btn-search" class="btn btn--ghost" title="搜索 (Ctrl+Shift+F)">🔍 搜索</button>
+        <button id="btn-search" class="btn btn--ghost" title="搜索 (Ctrl+Shift+F)">
+          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> 搜索
+        </button>
       </div>
 
       <div id="editor-area" class="editor-area hidden">
+        <div id="conflict-bar" class="conflict-bar hidden" role="alert">
+          <span id="conflict-text" class="conflict-bar__text"></span>
+          <span class="conflict-bar__actions">
+            <button id="btn-conflict-reload" class="btn btn--mini">重新载入</button>
+            <button id="btn-conflict-keep" class="btn btn--mini btn--ghost">保留我的并另存</button>
+          </span>
+        </div>
         <div class="editor-toolbar">
-          <div class="mode-switch" id="mode-switch">
-            <button data-mode="source" class="btn btn--mini">源码</button>
-            <button data-mode="split" class="btn btn--mini">分屏</button>
-            <button data-mode="preview" class="btn btn--mini">预览</button>
+          <div class="editor-toolbar__left">
+            <div class="mode-switch" id="mode-switch">
+              <button data-mode="source" class="btn btn--mini">源码</button>
+              <button data-mode="split" class="btn btn--mini">分屏</button>
+              <button data-mode="preview" class="btn btn--mini">预览</button>
+            </div>
+            <button id="btn-split-toggle" class="btn btn--ghost btn--split" title="两篇笔记对照编辑 (Ctrl+Shift+S)" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="#i-columns"/></svg> 双屏
+            </button>
           </div>
           <span id="save-state" class="save-state"></span>
         </div>
         <h1 id="note-title" class="note-title"></h1>
         <div id="properties" class="properties"></div>
         <div id="editor-container" class="editor-container">
+          <div id="editor-main" class="editor-main">
           <div id="editor-source" class="editor-pane">
             <div class="fallback-editor">
               <pre id="editor-gutter" class="editor-gutter" aria-hidden="true"></pre>
@@ -69,28 +255,129 @@
             </div>
           </div>
           <div id="editor-preview" class="preview-pane markdown-body"></div>
+          </div>
+          <div id="split-resizer" class="split-resizer hidden" title="拖动调整分屏比例"></div>
+          <div id="editor-secondary" class="editor-pane editor-pane--secondary hidden">
+            <div class="secondary-head">
+              <div id="tabs-secondary" class="tabbar__tabs"></div>
+              <span id="secondary-save-state" class="secondary-save-state"></span>
+              <button id="btn-split-close" class="btn btn--mini" title="关闭分屏">
+                <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+              </button>
+            </div>
+            <div id="editor-secondary-body" class="secondary-body">
+              <div class="fallback-editor">
+                <pre class="editor-gutter" aria-hidden="true"></pre>
+                <textarea class="editor-textarea" spellcheck="false"
+                  placeholder="第二编辑区：独立标签、独立光标、独立保存…"></textarea>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div id="welcome-screen" class="welcome-screen">
         <div class="welcome-screen__inner">
           <h2>Kwey</h2>
-          <p id="welcome-hint">打开一个文件夹作为知识库（vault），磁盘 Markdown 是唯一事实源。</p>
+          <p id="welcome-hint" class="welcome-screen__hint">打开一个文件夹作为知识库（vault），磁盘 Markdown 是唯一事实源。</p>
           <button id="btn-open-vault" class="btn btn--primary">打开 Vault</button>
-          <p class="welcome-screen__tips">Ctrl+O 快速切换 · Ctrl+P 命令面板 · Ctrl+Shift+F 搜索</p>
+          <p class="welcome-screen__tips">
+            <kbd>Ctrl</kbd>+<kbd>O</kbd> 快速切换 · <kbd>Ctrl</kbd>+<kbd>P</kbd> 命令面板 · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 搜索
+          </p>
+        </div>
+      </div>
+
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-state__inner">
+          <svg class="empty-state__icon" aria-hidden="true"><use href="#i-file"/></svg>
+          <h2>没有打开的笔记</h2>
+          <p class="empty-state__hint">从左侧文件树选择一篇，或快速开始：</p>
+          <div class="empty-state__actions">
+            <button id="btn-empty-new" class="btn btn--primary">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> 新建笔记
+            </button>
+            <button id="btn-empty-daily" class="btn">
+              <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> 每日笔记
+            </button>
+            <button id="btn-empty-switch" class="btn">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> 快速切换
+            </button>
+          </div>
+          <div id="pulse" class="pulse"></div>
+          <div id="empty-recent" class="empty-state__recent"></div>
+          <p class="empty-state__tips">
+            <kbd>Ctrl</kbd>+<kbd>O</kbd> 快速切换 · <kbd>Ctrl</kbd>+<kbd>N</kbd> 新建 · <kbd>Ctrl</kbd>+<kbd>P</kbd> 命令面板
+          </p>
         </div>
       </div>
     </main>
 
-    <!-- 右侧面板 -->
+    <div id="right-resizer" class="resizer" title="拖动调整右栏宽度"></div>
+    <!-- 右侧面板：多 tab -->
     <aside id="rightbar" class="rightbar">
-      <div class="sidebar__section">
-        <div class="sidebar__header"><span>反向链接</span></div>
-        <div id="backlinks" class="backlinks"></div>
+      <div id="right-tabs" class="panel-tabs" role="tablist">
+        <button data-panel="backlinks" role="tab">反链</button>
+        <button data-panel="graph" role="tab">图谱</button>
+        <button data-panel="chat" role="tab">助手</button>
       </div>
-      <div class="sidebar__section">
-        <div class="sidebar__header"><span>未链接提及</span></div>
-        <div id="unlinked" class="unlinked"></div>
+      <div class="sidebar__panels">
+        <section id="panel-backlinks" class="panel-view" data-panel="backlinks">
+          <div class="sidebar__section">
+            <div class="sidebar__header"><span>反向链接</span></div>
+            <div id="backlinks" class="backlinks"></div>
+          </div>
+          <div class="sidebar__section">
+            <div class="sidebar__header"><span>未链接提及</span></div>
+            <div id="unlinked" class="unlinked"></div>
+          </div>
+        </section>
+        <section id="panel-graph" class="panel-view hidden" data-panel="graph">
+          <div class="sidebar__header"><span>本地图谱</span>
+            <div class="sidebar__header-actions">
+              <div class="graph-depth" role="group" aria-label="邻域深度">
+                <button type="button" class="graph-depth__btn" data-depth="1">1跳</button>
+                <button type="button" class="graph-depth__btn" data-depth="2">2跳</button>
+                <button type="button" class="graph-depth__btn" data-depth="3">3跳</button>
+              </div>
+              <button id="btn-graph-refresh" class="btn btn--mini" title="刷新图谱"><svg class="icon"><use href="#i-restore"/></svg></button>
+            </div>
+          </div>
+          <div id="local-graph" class="graph-canvas graph-canvas--local"></div>
+        </section>
+        <section id="panel-chat" class="panel-view hidden" data-panel="chat">
+          <div class="sidebar__header"><span>内置智能体</span>
+            <span class="sidebar__header-actions">
+              <button id="btn-chat-clear" class="btn btn--mini" title="清空对话历史">清空</button>
+            </span>
+          </div>
+          <div id="chat-setup" class="chat-setup hidden">
+            <p id="chat-setup-text"></p>
+            <button id="btn-chat-setup" class="btn btn--mini">去设置</button>
+          </div>
+          <div id="chat-messages" class="chat-messages">
+            <div class="panel-empty">让内置智能体替你读写、整理笔记；危险操作会先征求你的确认。</div>
+          </div>
+          <div id="chat-busy" class="chat-busy hidden">智能体工作中…</div>
+          <div class="chat-input">
+            <div id="chat-context" class="chat-context hidden" title="当前工作区会随消息发给智能体">
+              <button id="chat-context-open" class="chat-context__path" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>
+                <span id="chat-context-name" class="chat-context__name"></span>
+                <span id="chat-context-dir" class="chat-context__dir"></span>
+              </button>
+              <select id="chat-context-scope" class="chat-context__scope" aria-label="上下文范围">
+                <option value="note">本篇</option>
+                <option value="dir">文件夹</option>
+                <option value="off">不使用</option>
+              </select>
+            </div>
+            <textarea id="chat-input" rows="2" placeholder="让智能体操作知识库… Enter 发送，Shift+Enter 换行"></textarea>
+            <div class="chat-input__actions">
+              <button id="btn-chat-stop" class="btn btn--mini hidden">停止</button>
+              <button id="btn-chat-send" class="btn btn--primary btn--mini">发送</button>
+            </div>
+          </div>
+        </section>
       </div>
     </aside>
   </div>
@@ -98,8 +385,11 @@
   <!-- ======================= 状态栏 ======================= -->
   <footer id="statusbar" class="statusbar">
     <span id="status-words">字数 0</span>
+    <span id="status-cursor">行 1 · 列 1</span>
+    <span id="status-selection" class="statusbar__selection"></span>
     <span id="status-save">—</span>
     <span class="statusbar__spacer"></span>
+    <span id="status-path" class="statusbar__path" title="点击复制路径"></span>
     <span id="status-index">索引：—</span>
   </footer>
 
@@ -109,7 +399,7 @@
       <input id="search-input" class="overlay__input" placeholder="搜索正文… 支持 path:目录 tag:标签 file:文件名"
         autocomplete="off"/>
       <div id="search-results" class="overlay__results"></div>
-      <div class="overlay__hint">Enter 打开首个 · Esc 关闭</div>
+      <div class="overlay__hint"><kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 打开 · <kbd>Esc</kbd> 关闭</div>
     </div>
   </div>
 
@@ -118,7 +408,7 @@
     <div class="overlay__panel">
       <input id="switcher-input" class="overlay__input" placeholder="输入笔记名快速切换…" autocomplete="off"/>
       <div id="switcher-results" class="overlay__results"></div>
-      <div class="overlay__hint">↑↓ 选择 · Enter 打开 · Esc 关闭</div>
+      <div class="overlay__hint"><kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 打开 · <kbd>Esc</kbd> 关闭</div>
     </div>
   </div>
 
@@ -127,57 +417,138 @@
     <div class="overlay__panel">
       <input id="palette-input" class="overlay__input" placeholder="输入命令…" autocomplete="off"/>
       <div id="palette-results" class="overlay__results"></div>
-      <div class="overlay__hint">↑↓ 选择 · Enter 执行 · Esc 关闭</div>
+      <div class="overlay__hint"><kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 执行 · <kbd>Esc</kbd> 关闭</div>
     </div>
   </div>
 
-  <!-- ======================= 设置页 ======================= -->
-  <div id="settings-page" class="settings-page hidden">
-    <div class="settings-page__panel">
-      <div class="settings-page__header">
-        <h2>设置</h2>
-        <button id="btn-settings-close" class="btn btn--ghost">✕ 关闭</button>
+  <!-- ======================= 浮层：全局图谱 ======================= -->
+  <div id="overlay-graph" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--graph">
+      <div class="graph-head">
+        <span>全局图谱</span>
+        <span id="graph-stats" class="graph-head__stats"></span>
+        <button id="btn-graph-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
       </div>
+      <div id="graph-global" class="graph-canvas graph-canvas--global"></div>
+      <div class="overlay__hint">节点=笔记，连线=双链；拖动节点可调整，点击节点打开笔记</div>
+    </div>
+  </div>
 
-      <section class="settings-section">
-        <h3>外观</h3>
-        <label class="settings-row">主题
-          <select id="settings-theme">
-            <option value="light">亮色</option>
-            <option value="dark">暗色</option>
-          </select>
-        </label>
-      </section>
+  <!-- ======================= 浮层：模板选择 ======================= -->
+  <div id="overlay-templates" class="overlay hidden">
+    <div class="overlay__panel">
+      <input id="template-input" class="overlay__input" placeholder="选择模板插入…" autocomplete="off"/>
+      <div id="template-list" class="overlay__results"></div>
+      <div class="overlay__hint"><kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 套用 · <kbd>Esc</kbd> 关闭</div>
+    </div>
+  </div>
 
-      <section class="settings-section">
-        <h3>附件</h3>
-        <label class="settings-row">附件目录（vault 相对路径）
-          <input id="settings-attachment-dir" type="text" placeholder="attachments"/>
-        </label>
-      </section>
+  <!-- ======================= 浮层：整理 diff 确认 ======================= -->
+  <div id="overlay-organize" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--wide">
+      <div class="graph-head">
+        <span>整理笔记 · diff 确认</span>
+        <span id="organize-path" class="graph-head__stats"></span>
+        <button id="btn-organize-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
+      </div>
+      <div class="organize-form">
+        <input id="organize-tags" type="text" placeholder="添加标签（逗号分隔，如 项目/进行中, 待复习）"/>
+        <input id="organize-link" type="text" placeholder="链接到笔记名（可留空）"/>
+        <input id="organize-instruction" type="text" placeholder="或用已配置的 Agent Provider 下达整理指令"/>
+        <button id="btn-organize-preview" class="btn btn--primary">生成预演</button>
+      </div>
+      <div id="organize-diffs" class="organize-diffs"><div class="panel-empty">填入标签 / 链接目标，或用 Provider 指令生成结构化 ops；预演不会写盘。</div></div>
+      <div class="overlay__hint">
+        <button id="btn-organize-apply" class="btn btn--primary" disabled>确认应用</button>
+        仅在逐项确认后落盘 · <kbd>Esc</kbd> 关闭
+      </div>
+    </div>
+  </div>
 
-      <section class="settings-section">
-        <h3>Vault</h3>
-        <div class="settings-row">
-          <input id="settings-vault-path" type="text" placeholder="输入 vault 绝对路径，如 D:/notes"/>
-          <button id="btn-vault-open" class="btn btn--primary">打开</button>
+  <!-- ======================= 浮层：F1 知识编译（raw → wiki） ======================= -->
+  <div id="overlay-compile" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--wide">
+      <div class="graph-head">
+        <span>知识编译 · raw → wiki</span>
+        <span id="compile-status" class="graph-head__stats">仅预演，未写盘</span>
+        <button id="btn-compile-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
+      </div>
+      <div class="organize-form">
+        <input id="compile-instruction" type="text" placeholder="编译指令，如：按主题整理 raw/ 并生成 MOC"/>
+        <div class="settings-row settings-row--inline">
+          <label>raw 目录 <input id="compile-raw-dir" type="text" value="raw"/></label>
+          <label>wiki 目录 <input id="compile-wiki-dir" type="text" value="wiki"/></label>
+          <label>目标路径 <input id="compile-paths" type="text" placeholder="可选，逗号分隔"/></label>
         </div>
-        <p id="settings-vault-info" class="settings-muted"></p>
-      </section>
+        <div class="settings-row settings-row--inline">
+          <button id="btn-compile-preview" class="btn btn--primary">生成预演</button>
+          <button id="btn-compile-health" class="btn">库体检</button>
+          <button id="btn-compile-apply" class="btn" disabled>确认应用</button>
+        </div>
+      </div>
+      <div class="organize-diffs">
+        <div id="compile-health" class="panel-empty"></div>
+        <div id="compile-ops" class="panel-empty"></div>
+        <div id="compile-diffs" class="panel-empty"></div>
+      </div>
+      <div class="overlay__hint">raw/ 只读；全部变更先 diff 预览，确认后才落盘 · <kbd>Esc</kbd> 关闭</div>
+    </div>
+  </div>
 
-      <section class="settings-section settings-section--disabled">
-        <h3>Agent Link（M2 敬请期待）</h3>
-        <p class="settings-muted">MCP Server · 事件订阅 · Provider 适配 · Token 鉴权</p>
-      </section>
-      <section class="settings-section settings-section--disabled">
-        <h3>向量检索（M3 敬请期待）</h3>
-        <p class="settings-muted">Chroma 混合排序 · bge-small-zh 本地 embedding</p>
-      </section>
+  <!-- ======================= 浮层：F4 RAG 问答（C5） ======================= -->
+  <div id="overlay-rag" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--wide">
+      <div class="graph-head">
+        <span>问我库 · RAG 问答</span>
+        <button id="btn-rag-clear" class="btn btn--ghost">清空</button>
+        <button id="btn-rag-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
+      </div>
+      <div class="organize-form">
+        <input id="rag-input" type="text" placeholder="输入问题，从知识库找答案…"/>
+        <button id="btn-rag-ask" class="btn btn--primary">提问</button>
+      </div>
+      <div id="rag-history" class="rag-history" style="max-height:55vh;overflow:auto"></div>
+      <div class="overlay__hint">引用可点击直达笔记 · <kbd>Esc</kbd> 关闭</div>
+    </div>
+  </div>
+
+  <!-- ======================= 浮层：快照时间线 ======================= -->
+  <div id="overlay-history" class="overlay hidden">
+    <div class="overlay__panel overlay__panel--wide">
+      <div class="graph-head">
+        <span>快照时间线</span>
+        <span id="history-path" class="graph-head__stats"></span>
+        <button id="btn-history-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+      <div class="overlay__hint">回滚前会自动提交当前版本，现有内容不会丢失</div>
+    </div>
+  </div>
+
+  <!-- ======================= 浮层：知识脉冲明细（孤儿/断链） ======================= -->
+  <div id="overlay-pulse" class="overlay hidden">
+    <div class="overlay__panel">
+      <div class="graph-head">
+        <span id="pulse-list-title">孤儿笔记</span>
+        <button id="btn-pulse-list-close" class="btn btn--ghost"><svg class="icon"><use href="#i-close"/></svg> 关闭</button>
+      </div>
+      <div id="pulse-list" class="overlay__results"></div>
+      <div class="overlay__hint">点击条目打开笔记 · <kbd>Esc</kbd> 关闭</div>
+    </div>
+  </div>
+
+  <!-- ======================= 设置页（schema 驱动渲染） ======================= -->
+  <div id="settings-page" class="settings-page hidden">
+    <div class="settings-shell" role="dialog" aria-modal="true" aria-labelledby="settings-group-title">
+      <aside id="settings-nav"></aside>
+      <div id="settings-panel" role="tabpanel" aria-labelledby="settings-group-title"></div>
     </div>
   </div>
 
   <div id="toasts" class="toasts"></div>
 
   <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/splash.js"></script>
+  <script type="module" src="/static/js/slides.js"></script>
 </body>
 </html>

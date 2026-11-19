@@ -86,8 +86,48 @@ class LinkifyRequest(BaseModel):
     line: Optional[int] = None  # 1-based 行号；缺省取第一处
 
 
+class RenderRequest(BaseModel):
+    """预览渲染请求：content 为编辑器未落盘的当前正文，缺省则回退读盘。"""
+
+    path: str
+    content: Optional[str] = None
+
+
 class SettingsUpdateRequest(BaseModel):
     theme: Optional[str] = None
     attachment_dir: Optional[str] = None
     editor_mode: Optional[str] = None
     autosave_delay_ms: Optional[int] = None
+    # ---- M2 Agent Link / A2 向量检索配置 ----
+    agent: Optional[Dict[str, Any]] = None
+    snapshots: Optional[Dict[str, Any]] = None
+    vector: Optional[Dict[str, Any]] = None  # A2：enabled/model/weight/graph_weight/rrf_k
+    fonts: Optional[Dict[str, Any]] = None   # 字号：ui/sidebar/editor/chat（px，前端注入 CSS 变量）
+    # ---- P1 前端功能配置 ----
+    template_dir: Optional[str] = None
+    daily_dir: Optional[str] = None
+    bookmarks: Optional[List[str]] = None
+    recent: Optional[List[str]] = None
+    hotkeys: Optional[Dict[str, str]] = None
+    sidebar_width: Optional[int] = None
+    rightbar_width: Optional[int] = None
+    left_panel: Optional[str] = None
+    right_panel: Optional[str] = None
+    # ---- Wave A 第二批（C1-C6）----
+    periodic_dir: Optional[str] = None
+    clip_dir: Optional[str] = None
+    custom_css_enabled: Optional[bool] = None
+
+
+class TrashRestoreRequest(BaseModel):
+    """回收站恢复：trash_path 为 .trash/ 内路径，target_path 缺省按原路径恢复。"""
+
+    trash_path: str
+    target_path: Optional[str] = None
+
+
+class TemplateApplyRequest(BaseModel):
+    """模板套用：template_path 为模板相对路径，target_path 缺省按日期命名放 vault 根。"""
+
+    template_path: str
+    target_path: Optional[str] = None

@@ -1,4 +1,4 @@
-"""索引器：全量扫描 + 单文件增量索引（notes / links / tags / fts 同步更新 + 内存图同步）。"""
+"""索引器：全量扫描 + 单文件增量索引（notes / links / tags / fts / 向量同步更新 + 内存图同步）。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from app.config import AppSettings
 from app.index.database import IndexDatabase
 from app.index.linkgraph import LinkGraph
+from app.index.vector import VectorIndex, build_vector_index
 from app.parser import frontmatter as fm_mod
 from app.parser.tags import extract_inline_tags, normalize_fm_tags
 from app.parser.wikilink import extract_wikilinks, split_anchor
@@ -23,16 +25,30 @@ NOTE_EXTS = MARKDOWN_EXTS
 class Indexer:
     """索引层门面。任何写盘后的索引更新都必须经这里（VaultService / Watcher 调用）。"""
 
-    def __init__(self, paths: AppPaths, db: IndexDatabase, linkgraph: LinkGraph) -> None:
+    def __init__(
+        self,
+        paths: AppPaths,
+        db: IndexDatabase,
+        linkgraph: LinkGraph,
+        vector: Optional[VectorIndex] = None,
+    ) -> None:
         self.paths = paths
         self.db = db
         self.linkgraph = linkgraph
+        if vector is None:
+            cfg = AppSettings(paths.root).load().get("vector") or {}
+            vector = build_vector_index(paths.root, cfg)
+        self.vector = vector
 
     # ------------------------------------------------------------------ full
     def full_scan(self) -> int:
         """全量扫描建索引；返回笔记数。完成后调 stamp_index_ready。"""
         root = self.paths.ensure_root()
         self.db.reset()
+        try:
+            self.vector.reset()
+        except Exception:  # noqa: BLE001 —— 向量是增强能力，失败不阻断整库重建
+            logger.exception("向量索引重置失败（跳过，FTS 索引不受影响）")
         count = 0
         for abs_path in sorted(root.rglob("*")):
             if not abs_path.is_file():
@@ -68,8 +84,18 @@ class Indexer:
             self.remove_note(rel)
             return False
 
-        raw = abs_path.read_text(encoding="utf-8-sig")
-        fm, body = fm_mod.parse_frontmatter(raw)
+        try:
+            raw = abs_path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            # 非 UTF-8 文件：不进笔记索引，只登记文件名供嵌入解析
+            logger.warning("跳过非 UTF-8 文件: %s", rel)
+            self.linkgraph.upsert_file(rel)
+            return False
+        try:
+            fm, body = fm_mod.parse_frontmatter(raw)
+        except Exception:  # noqa: BLE001 —— 单篇笔记解析异常不阻断整库索引
+            logger.exception("笔记索引失败（跳过）: %s", rel)
+            return False
         stat = abs_path.stat()
 
         if abs_path.suffix.lower() in NOTE_EXTS:
@@ -93,6 +119,10 @@ class Indexer:
             self.db.upsert_fts(rel, title, body, " ".join(self._all_tags(fm, body)))
             self.linkgraph.upsert_note(rel)
             self.linkgraph.apply(rel, self.db.links_for(rel))
+            try:
+                self.vector.upsert(rel, f"{title}\n{body}")
+            except Exception:  # noqa: BLE001
+                logger.exception("向量索引写入失败（跳过）: %s", rel)
             return old_links != new_links
 
         # 非笔记文件：仅登记进图（附件嵌入解析用）
@@ -111,6 +141,10 @@ class Indexer:
             self.db.break_links_to(rel)
         self.linkgraph.remove(rel)
         self.linkgraph.remove_entry(rel)
+        try:
+            self.vector.remove(rel)
+        except Exception:  # noqa: BLE001
+            logger.exception("向量索引移除失败（跳过）: %s", rel)
 
     def remove_file_entry(self, rel: str) -> None:
         """非笔记文件移除（附件删除）。"""

@@ -1,4 +1,4 @@
-/* 搜索面板：操作符输入 + 高亮结果 + 点击跳转（P0-6）。 */
+/* 搜索面板：操作符输入 + 高亮结果 + 点击/键盘跳转（P0-6）。 */
 
 import { api, reportError } from './api.js';
 import { emit } from './state.js';
@@ -21,11 +21,10 @@ export function initSearch() {
     debouncedTimer = setTimeout(() => runSearch(inputEl.value), 180);
   });
   inputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSearch();
-    if (e.key === 'Enter') {
-      const first = resultsEl.querySelector('.result-item');
-      if (first && first.dataset.path) { emit('open-note', first.dataset.path); closeSearch(); }
-    }
+    if (e.key === 'Escape') { closeSearch(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSelection(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveSelection(-1); return; }
+    if (e.key === 'Enter') { e.preventDefault(); pickSelection(); }
   });
 }
 
@@ -38,6 +37,22 @@ export function openSearch() {
 
 export function closeSearch() {
   overlayEl.classList.add('hidden');
+}
+
+function items() { return [...resultsEl.querySelectorAll('.result-item')]; }
+
+function moveSelection(delta) {
+  const list = items();
+  if (!list.length) return;
+  const idx = list.findIndex((el) => el.classList.contains('result-item--active'));
+  const next = (Math.max(idx, 0) + delta + list.length) % list.length;
+  list.forEach((el, i) => el.classList.toggle('result-item--active', i === next));
+  list[next].scrollIntoView({ block: 'nearest' });
+}
+
+function pickSelection() {
+  const el = resultsEl.querySelector('.result-item--active') || resultsEl.querySelector('.result-item');
+  if (el && el.dataset.path) { emit('open-note', el.dataset.path); closeSearch(); }
 }
 
 async function runSearch(q) {
@@ -56,9 +71,9 @@ async function runSearch(q) {
     head.className = 'panel-empty';
     head.textContent = `共 ${data.total} 条 · ${data.elapsed_ms}ms`;
     resultsEl.appendChild(head);
-    for (const hit of data.hits) {
+    data.hits.forEach((hit, i) => {
       const el = document.createElement('div');
-      el.className = 'result-item';
+      el.className = `result-item${i === 0 ? ' result-item--active' : ''}`;
       el.dataset.path = hit.path;
       // snippet 由服务端转义 + <mark> 高亮，此处可直接插入
       el.innerHTML = `
@@ -67,7 +82,7 @@ async function runSearch(q) {
         ${hit.snippet ? `<span class="result-item__snippet">${hit.snippet}</span>` : ''}`;
       el.addEventListener('click', () => { emit('open-note', hit.path); closeSearch(); });
       resultsEl.appendChild(el);
-    }
+    });
   } catch (err) { reportError(err); }
 }
 

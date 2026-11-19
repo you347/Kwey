@@ -1,0 +1,140 @@
+/* ============ P2 幻灯片演示层 ============
+   全屏遮罩 + 居中舞台 + 底部工具条。颜色/圆角/字号全部走主题 token，
+   深浅两套由 html[data-theme] 自动切换；作用域限定在 #slides-overlay。 */
+
+#slides-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 190;                 /* 盖住命令面板/普通浮层，但低于 toast(200) 与开屏(210) */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 34px 40px 18px;
+  background: var(--bg);
+  color: var(--text);
+  animation: slides-fade 0.16s ease;
+}
+@keyframes slides-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 舞台：占满可用高度，内容超出时在页内滚动而非整层滚动 */
+#slides-overlay .slides__stage {
+  flex: 1;
+  min-height: 0;
+  width: min(1120px, 100%);
+  display: flex;
+  justify-content: center;
+}
+
+#slides-overlay .slide {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+#slides-overlay .slide__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 56px 64px;
+  font-size: calc(var(--font-editor) * 1.45);
+  line-height: 1.65;
+  color: var(--text);
+  /* 长单词/链接不撑破页面 */
+  overflow-wrap: anywhere;
+}
+
+/* markdown-body 自带排版（editor.css）在此放大到演示字号：标题随父级 em 缩放 */
+#slides-overlay .slide__body h1,
+#slides-overlay .slide__body h2 { border-bottom-color: var(--border-faint); }
+#slides-overlay .slide__body h1 { font-size: 1.75em; }
+#slides-overlay .slide__body h2 { font-size: 1.4em; }
+#slides-overlay .slide__body img { max-height: 58vh; object-fit: contain; }
+#slides-overlay .slide__body table { font-size: 0.9em; }
+
+/* 占位与降级：单页渲染失败时以纯文本呈现，不阻断演示 */
+#slides-overlay .slide__empty {
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  font-style: italic;
+}
+#slides-overlay .slide__fallback {
+  margin: 0;
+  padding: 16px 18px;
+  background: var(--code-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+/* ---------------- 底部工具条 ---------------- */
+#slides-overlay .slides__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-alt);
+  box-shadow: var(--shadow-soft);
+}
+
+#slides-overlay .slides__btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+#slides-overlay .slides__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+#slides-overlay .slides__btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-faint);
+}
+/* 首末页禁用：真 disabled（不可点、不可聚焦），仅降低不透明度做提示 */
+#slides-overlay .slides__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+#slides-overlay .slides__btn--close:hover {
+  color: var(--broken);
+  background: var(--bg-hover);
+}
+
+#slides-overlay .slides__page {
+  min-width: 56px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  user-select: none;
+}
+#slides-overlay .slides__cur { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  #slides-overlay { animation: none; }
+  #slides-overlay .slides__btn { transition: none; }
+}

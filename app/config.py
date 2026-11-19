@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from pathlib import Path
@@ -15,21 +16,45 @@ class AppSettings:
     """vault 级设置。缺失/损坏的 settings.json 自动回退默认值并重建。"""
 
     DEFAULTS: Dict[str, Any] = {
-        "theme": "light",              # light | dark（P0-13）
+        "theme": "dark",               # light | dark（P0-13；默认深色仪器面板）
         "attachment_dir": "attachments",  # 附件目录（vault 相对，P0-12）
         "editor_mode": "split",        # source | preview | split（P0-2）
         "watch_debounce_ms": 300,      # watchfiles 防抖（风险点①）
         "watch_step_ms": 400,
         "autosave_delay_ms": 800,      # 前端防抖自动保存
-        # ---- M2/M3 预留（本期灰置，不实现） ----
-        "agent": {"enabled": False, "provider": None},   # T11 占位
-        "vector": {"enabled": False, "model": "bge-small-zh-v1.5"},  # T12 占位
+        # 字号：按区域独立调节（px）。ui=全局，sidebar=左栏，editor=编辑+预览，chat=智能体聊天
+        "fonts": {"ui": 13, "sidebar": 13, "editor": 15, "chat": 13},
+        # ---- M2 Agent Link（已实现）/ M3 预留 ----
+        "agent": {"enabled": True, "provider": None},    # M2：MCP / REST / SSE / diff
+        "snapshots": {"enabled": False, "auto_commit": True},  # M2：git 快照（默认关闭）
+        # A2：向量检索可配置。enabled 默认关闭（零依赖开箱即用）；缺 chromadb 时自动降级纯 FTS
+        "vector": {
+            "enabled": False,
+            "model": "bge-small-zh-v1.5",
+            "weight": 1.0,       # RRF 中向量通道权重
+            "graph_weight": 0.5, # 链接图扩展权重
+            "rrf_k": 60,         # RRF 平滑常数
+        },
+        # ---- P1 前端功能配置 ----
+        "template_dir": "templates",      # 模板目录（vault 相对，P1 模板）
+        "daily_dir": "daily",             # 每日笔记目录（P1）
+        "bookmarks": [],                  # 收藏笔记路径列表
+        "recent": [],                    # 最近打开笔记路径列表
+        "hotkeys": {},                   # 自定义快捷键映射
+        "sidebar_width": 240,            # 左栏宽度（px）
+        "rightbar_width": 260,           # 右栏宽度（px）
+        "left_panel": "files",           # 左栏默认面板
+        "right_panel": "backlinks",      # 右栏默认面板
+        # ---- Wave A 第二批（C1-C6）----
+        "periodic_dir": "templates",     # 周期笔记模板目录（C2；与 daily 共用）
+        "clip_dir": "clips",             # 网页剪藏落盘目录（C6）
+        "custom_css_enabled": False,     # 自定义 CSS 实时预览开关（C4；CSS 内容存独立文件）
     }
 
     def __init__(self, vault_root: Optional[Path] = None) -> None:
         self._lock = threading.RLock()
         self._root: Optional[Path] = Path(vault_root) if vault_root else None
-        self._data: Dict[str, Any] = dict(self.DEFAULTS)
+        self._data: Dict[str, Any] = copy.deepcopy(self.DEFAULTS)
 
     # ------------------------------------------------------------------ path
     @property
@@ -46,7 +71,7 @@ class AppSettings:
     def load(self) -> "AppSettings":
         """读取 settings.json 并合并到默认值之上；文件缺失/损坏时用默认值。"""
         with self._lock:
-            self._data = dict(self.DEFAULTS)
+            self._data = copy.deepcopy(self.DEFAULTS)
             path = self.settings_path
             if path is not None and path.is_file():
                 try:
@@ -82,9 +107,17 @@ class AppSettings:
         """合并更新并持久化；返回更新后的完整设置。"""
         with self._lock:
             for key, value in values.items():
-                if key in ("agent", "vector"):
-                    continue  # M2/M3 预留区块本期不可改
-                self._data[key] = value
+                # A2：vector 已开放；合并子键而非整体覆盖，避免只改 enabled 时丢失 model/weight
+                if key == "vector" and isinstance(value, dict) and isinstance(self._data.get("vector"), dict):
+                    merged = dict(self._data["vector"])
+                    merged.update(value)
+                    self._data["vector"] = merged
+                elif key == "fonts" and isinstance(value, dict) and isinstance(self._data.get("fonts"), dict):
+                    merged = dict(self._data["fonts"])
+                    merged.update(value)
+                    self._data["fonts"] = merged
+                else:
+                    self._data[key] = value
             self.save()
             return dict(self._data)
 

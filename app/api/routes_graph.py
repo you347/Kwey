@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from app.api import deps
 from app.models import LinkifyRequest
 from app.parser.wikilink import extract_wikilinks, split_anchor
+from app.paths import normalize_rel
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -159,3 +160,72 @@ async def tag_notes(tag: str):
     tag = tag.strip().lstrip("#")
     notes = [{"path": p, "title": t} for p, t in db.notes_with_tag(tag)]
     return {"code": 0, "data": notes, "message": "ok"}
+
+
+# ---------------------------------------------------------------- 图谱数据
+def _collect_graph(db, allowed: Optional[set]) -> dict:
+    """组装图谱数据。allowed=None 表示全库；否则只保留该邻域内的笔记节点。
+
+    nodes 只含 md 笔记；edges 只含已解析链接（按 source/target/kind 去重）；
+    unresolved 为断链（source_path + 原始 target 文本，按二元组去重）。
+    """
+    notes = db.all_notes()
+    node_map = {n["path"]: n["title"] for n in notes}
+    node_paths = set(node_map) if allowed is None else (set(node_map) & set(allowed))
+    nodes = [{"path": p, "title": node_map[p]} for p in sorted(node_paths)]
+
+    edges: List[dict] = []
+    seen_edges = set()
+    for link in db.all_links():
+        target = link["target_path"]
+        if not target:  # 未解析链接单列 unresolved
+            continue
+        source = link["source_path"]
+        if allowed is not None and (source not in node_paths or target not in node_paths):
+            continue
+        key = (source, target, link["kind"])
+        if key in seen_edges:
+            continue
+        seen_edges.add(key)
+        edges.append({"source": source, "target": target, "kind": link["kind"]})
+
+    unresolved: List[dict] = []
+    seen_unres = set()
+    for link in db.unresolved_links():
+        source = link["source_path"]
+        if allowed is not None and source not in node_paths:
+            continue
+        key = (source, link["target"])
+        if key in seen_unres:
+            continue
+        seen_unres.add(key)
+        unresolved.append({"source": source, "target": link["target"]})
+    return {"nodes": nodes, "edges": edges, "unresolved": unresolved}
+
+
+@router.get("/full")
+async def graph_full():
+    """全库图谱：nodes 仅 md 笔记；edges 仅已解析链接（去重）；unresolved 为断链。"""
+    db = deps.require_db()
+    return {"code": 0, "data": _collect_graph(db, None), "message": "ok"}
+
+
+@router.get("/local")
+async def graph_local(path: str, depth: int = 1):
+    """局部图谱：以 path 为中心，双向（入链+出链）扩展 depth 跳邻域。"""
+    if depth < 1 or depth > 3:
+        raise HTTPException(status_code=400, detail="depth 仅支持 1..3")
+    linkgraph = deps.require_linkgraph()
+    db = deps.require_db()
+    center = normalize_rel(path)
+    visited = {center}
+    frontier = {center}
+    for _ in range(depth):
+        following = set()
+        for node in frontier:
+            following |= linkgraph.out_links_of(node)
+            following |= linkgraph.backlinks(node)
+        following -= visited
+        visited |= following
+        frontier = following
+    return {"code": 0, "data": _collect_graph(db, visited), "message": "ok"}

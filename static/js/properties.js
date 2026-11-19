@@ -1,6 +1,7 @@
 /* frontmatter 属性区：展示与编辑，保存后走统一写路径写回（P0-10）。 */
 
 import { escapeHtml, $, toast } from './utils.js';
+import { askText } from './dialog.js';
 
 let visible = true;
 
@@ -55,8 +56,8 @@ export function renderProperties(fm, onSave) {
     toggle.textContent = `${visible ? '▾' : '▸'} 属性 (${entries.length})`;
   });
 
-  box.querySelector('#props-add').addEventListener('click', () => {
-    const key = window.prompt('新属性名：');
+  box.querySelector('#props-add').addEventListener('click', async () => {
+    const key = await askText({ title: '新增属性', label: '属性名（frontmatter 键）', confirmText: '添加' });
     if (!key) return;
     const data = collect();
     data[key] = '';

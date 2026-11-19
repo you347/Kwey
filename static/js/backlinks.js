@@ -47,7 +47,7 @@ export async function refreshBacklinks(path) {
       el.innerHTML = `
         <div class="backlink-item__title">${escapeHtml(m.title)}</div>
         ${m.snippet ? `<div class="backlink-item__snippet">${escapeHtml(m.snippet)}</div>` : ''}
-        <button class="btn btn--mini linkify-btn" title="在该处创建 [[双链]]">🔗 转为双链</button>`;
+        <button class="btn btn--mini linkify-btn" title="在该处创建 [[双链]]"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg> 转为双链</button>`;
       el.querySelector('.linkify-btn').addEventListener('click', async (e) => {
         e.stopPropagation();
         try {

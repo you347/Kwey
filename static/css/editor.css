@@ -1,5 +1,23 @@
 /* ============ Kwey 编辑器与预览 ============ */
 
+/* 外部/Agent 写入冲突条：只在编辑器有未保存内容时出现，给出「重新载入 / 另存副本」两条安全出口。
+   颜色全部走主题 token（--bg-alt / --border / --broken / --text），不写死颜色。 */
+.conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 6px 14px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--broken);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.conflict-bar.hidden { display: none; }
+.conflict-bar__text { flex: 1; min-width: 0; line-height: 1.45; }
+.conflict-bar__actions { flex: none; display: flex; gap: 6px; }
+
 .editor-toolbar {
   display: flex;
   align-items: center;
@@ -7,18 +25,66 @@
   padding: 6px 18px;
   flex: none;
 }
-.mode-switch { display: inline-flex; gap: 4px; }
-.mode-switch .btn--mini.btn--active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+.editor-toolbar__left { display: flex; align-items: center; gap: 8px; }
+
+/* 双屏开关：激活态用 accent-faint 底 + accent 字（与 ribbon 激活语义一致） */
+.btn--split.btn--active {
+  color: var(--accent);
+  background: var(--accent-faint);
+  border-color: transparent;
 }
-.save-state { font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 模式切换：分段控件 ----------------
+   同心圆角：外 6 + padding 2 = 内 4；激活态用底色 + 字重，
+   不占用强调色（强调色留给真正的主操作） */
+.mode-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.mode-switch .btn--mini {
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  min-height: 20px;
+}
+.mode-switch .btn--mini:hover { background: var(--bg-hover); }
+.mode-switch .btn--mini.btn--active {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-soft);
+}
+.save-state { font-size: var(--fs-xs); color: var(--text-dim); }
+
+/* 保存状态语义圆点：编辑中灰点呼吸 / 已保存绿 / 失败红 */
+.save-state, .secondary-save-state { display: inline-flex; align-items: center; gap: 6px; }
+.save-state::before, .secondary-save-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  flex: none;
+}
+.save-state[data-kind="editing"]::before,
+.secondary-save-state[data-kind="editing"]::before {
+  background: var(--text-dim);
+  animation: save-pulse 1.2s ease-in-out infinite;
+}
+.save-state[data-kind="saved"]::before,
+.secondary-save-state[data-kind="saved"]::before { background: var(--success); }
+.save-state[data-kind="error"]::before,
+.secondary-save-state[data-kind="error"]::before { background: var(--broken); }
+@keyframes save-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .note-title {
-  padding: 0 18px 6px;
-  font-size: 20px;
-  font-weight: 700;
+  padding: 0 18px 8px;
+  font-size: calc(var(--font-editor) + 7px);
+  font-weight: 600;
   flex: none;
 }
 
@@ -41,10 +107,10 @@
   text-align: right;
   color: var(--text-dim);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: calc(var(--font-editor) - 2px);
+  line-height: 1.65;
   background: var(--bg-alt);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-faint);
   overflow: hidden;
   user-select: none;
 }
@@ -55,12 +121,13 @@
   resize: none;
   padding: 10px 14px;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--font-editor);
+  line-height: 1.65;
   background: var(--bg);
   color: var(--text);
+  min-height: 0;
 }
-.editor-textarea:focus { border: none; }
+.editor-textarea:focus { border: none; box-shadow: none; }
 
 /* 模式可见性 */
 .editor-area[data-mode="source"] .preview-pane { display: none; }
@@ -74,43 +141,46 @@
   min-width: 0;
   overflow-y: auto;
   padding: 14px 22px 40px;
-  line-height: 1.7;
+  font-size: var(--font-editor);
+  line-height: 1.75;
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
-.markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 0.9em 0 0.4em; line-height: 1.35; }
-.markdown-body h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
-.markdown-body h2 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: 0.15em; }
-.markdown-body h3 { font-size: 1.2em; }
-.markdown-body p { margin: 0.5em 0; }
-.markdown-body ul, .markdown-body ol { margin: 0.5em 0; padding-left: 1.6em; }
+.markdown-body h4, .markdown-body h5, .markdown-body h6 { margin: 1em 0 0.4em; line-height: 1.35; }
+.markdown-body h1 { font-size: 1.6em; font-weight: 600; border-bottom: 1px solid var(--border-faint); padding-bottom: 0.2em; }
+.markdown-body h2 { font-size: 1.35em; font-weight: 600; border-bottom: 1px solid var(--border-faint); padding-bottom: 0.15em; }
+.markdown-body h3 { font-size: 1.15em; font-weight: 600; }
+.markdown-body p { margin: 0.55em 0; }
+.markdown-body ul, .markdown-body ol { margin: 0.55em 0; padding-left: 1.6em; }
 .markdown-body blockquote {
   margin: 0.6em 0;
   padding: 0.2em 1em;
-  border-left: 3px solid var(--accent);
-  color: var(--text-dim);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
   background: var(--bg-alt);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 .markdown-body code {
   background: var(--code-bg);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
   font-family: Consolas, "Courier New", monospace;
   font-size: 0.9em;
 }
 .markdown-body pre {
   background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   overflow-x: auto;
   margin: 0.6em 0;
 }
 .markdown-body pre code { background: transparent; padding: 0; }
 .markdown-body table { border-collapse: collapse; margin: 0.6em 0; }
-.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 10px; }
-.markdown-body img { max-width: 100%; border-radius: 4px; }
-.markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border-faint); padding: 4px 10px; }
+.markdown-body th { background: var(--bg-alt); font-weight: 600; }
+.markdown-body img { max-width: 100%; border-radius: var(--radius-sm); }
+.markdown-body hr { border: none; border-top: 1px solid var(--border-faint); margin: 1em 0; }
 .markdown-body a { color: var(--accent); }
 .preview-error { color: var(--broken); padding: 10px 0; }
 
@@ -121,7 +191,7 @@
   text-decoration: none;
   border-bottom: 1px dashed var(--accent);
 }
-.kwey-wikilink:hover { background: var(--bg-hover); }
+.kwey-wikilink:hover { background: var(--accent-faint); border-bottom-style: solid; }
 .kwey-wikilink--broken {
   color: var(--broken);
   border-bottom: 1px dashed var(--broken);
@@ -129,45 +199,85 @@
 }
 .kwey-embed {
   display: block;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
+  border: 1px solid var(--border-faint);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: 8px 14px;
   margin: 0.6em 0;
   background: var(--bg-alt);
 }
 .kwey-embed--missing { color: var(--broken); border-left-color: var(--broken); }
 .kwey-embed-image { max-width: 100%; display: block; }
+
+/* 标签胶囊：浅底深字（Badge 黄金法则） */
 .kwey-tag {
   color: var(--tag);
   cursor: pointer;
   font-size: 0.9em;
-  background: var(--bg-panel);
+  background: var(--tag-bg);
   border-radius: 8px;
   padding: 1px 7px;
 }
-.kwey-tag:hover { background: var(--bg-hover); }
+.kwey-tag:hover { background: var(--accent-faint); }
 
 /* ---------------- CodeMirror 主题对齐（vendored CM5） ---------------- */
 .CodeMirror {
   height: 100% !important;
   flex: 1;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--font-editor);
+  line-height: 1.65;
   background: var(--bg);
   color: var(--text);
 }
-.CodeMirror-gutters { background: var(--bg-alt); border-right: 1px solid var(--border); }
+.CodeMirror-gutters { background: var(--bg-alt); border-right: 1px solid var(--border-faint); }
 .CodeMirror-linenumber { color: var(--text-dim); }
 .CodeMirror-cursor { border-left: 2px solid var(--accent); }
 .CodeMirror-selected { background: var(--bg-hover) !important; }
 .CodeMirror-activeline-background { background: var(--bg-panel); }
-.cm-s-kwey.cm-header { color: var(--accent); font-weight: 700; }
-.cm-s-kwey.cm-string, .cm-s-kwey.cm-link { color: #2da44e; }
+.cm-s-kwey.cm-header { color: var(--text); font-weight: 700; }
+.cm-s-kwey.cm-header.cm-header-1, .cm-s-kwey.cm-header.cm-header-2 { color: var(--accent); }
+.cm-s-kwey.cm-string, .cm-s-kwey.cm-link { color: #1a7f37; }
 .cm-s-kwey.cm-keyword, .cm-s-kwey.cm-quote { color: var(--tag); }
 .cm-s-kwey.cm-comment { color: var(--text-dim); }
 .cm-s-kwey.cm-em { font-style: italic; }
 .cm-s-kwey.cm-strong { font-weight: 700; }
 html[data-theme="dark"] .cm-s-kwey.cm-string,
 html[data-theme="dark"] .cm-s-kwey.cm-link { color: #7ee787; }
+
+/* ---------------- P1-19 两篇独立笔记分屏编辑 ---------------- */
+/* 主区包裹层（源码+预览）：未分屏时布局与原先完全一致 */
+.editor-main { display: flex; flex: 1; min-width: 0; }
+
+/* 分屏开启：主区与副屏按 flex-grow 比例分配（splitview 拖拽内联设置） */
+.editor-container--split .editor-main,
+.editor-container--split .editor-pane--secondary { flex-basis: 0; min-width: 160px; }
+
+.editor-pane--secondary { flex-direction: column; }
+
+.secondary-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border-faint);
+}
+.secondary-head .tabbar__tabs { flex: 1; min-width: 0; }
+.secondary-head .tab { height: 30px; }
+.secondary-save-state { flex: none; font-size: var(--fs-xs); color: var(--text-dim); }
+.secondary-body { flex: 1; min-height: 0; display: flex; }
+
+/* 拖拽分隔条（复用 shell 的 body.is-resizing 拖拽态） */
+.split-resizer {
+  flex: none;
+  width: 5px;
+  cursor: col-resize;
+  border-left: 1px solid var(--border);
+  background: transparent;
+}
+.split-resizer:hover, .split-resizer.is-dragging { background: var(--accent-faint); }
+
+/* 焦点屏指示条：Ctrl+S / Ctrl+W 的作用对象一目了然 */
+.editor-pane--focused { box-shadow: inset 0 2px 0 0 var(--accent); }

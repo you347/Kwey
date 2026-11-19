@@ -130,6 +130,17 @@ class TestSystem:
         resp = client.put("/api/settings", json={"theme": "blue"})
         assert resp.status_code == 400
 
+    def test_fonts_setting_merge(self, client):
+        """字号按子键合并：只改一个区域时不能丢其它区域的默认值。"""
+        data = _body(client.put("/api/settings", json={"fonts": {"ui": 16}}))["data"]
+        assert data["fonts"]["ui"] == 16
+        assert data["fonts"]["editor"] == 15  # 默认保留
+
+        data2 = _body(client.put("/api/settings", json={"fonts": {"chat": 15}}))["data"]
+        assert data2["fonts"]["ui"] == 16
+        assert data2["fonts"]["chat"] == 15
+        assert data2["fonts"]["sidebar"] == 13
+
     def test_attachment_upload_and_serve(self, client):
         resp = client.post(
             "/api/attachments",

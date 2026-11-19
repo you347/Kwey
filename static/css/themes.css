@@ -1,56 +1,148 @@
-/* ============ Kwey 主题变量（P0-13：暗色/亮色即时切换并持久化） ============ */
+/* ============ Kwey 设计 Token（v3：与设置页同一套视觉语言） ============
+   方向：深色仪器面板。画布最深、面板次之、浮起行更亮；0.5px 发丝边框切分层级；
+        单一青绿强调色只用于主按钮 / 当前项 / 焦点环 / wikilink；阴影只给真实浮层。
+   字号：由 --font-* 四个变量驱动（设置页可调），--fs-* 按 --font-ui 派生。
+   =================================================== */
 
-:root,
-html[data-theme="light"] {
-  --bg: #ffffff;
-  --bg-alt: #f6f8fa;
-  --bg-panel: #eff2f5;
-  --bg-hover: #e7ebf0;
-  --text: #24292f;
-  --text-dim: #6a737d;
-  --border: #d0d7de;
-  --accent: #0969da;
-  --accent-text: #ffffff;
-  --mark: #fff1a8;
-  --broken: #cf222e;
-  --tag: #0969da;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.14);
-  --code-bg: #f0f2f4;
-  --scrollbar: #c4cdd6;
-  color-scheme: light;
+:root {
+  /* 字号（px，由设置页写入 <html> 内联样式；此处为默认值） */
+  --font-ui: 13px;        /* 全局：按钮、面板、标签 */
+  --font-sidebar: 13px;   /* 左侧栏（文件树 / 标签 / 列表） */
+  --font-editor: 15px;    /* 中心区：源码编辑 + 预览 */
+  --font-chat: 13px;      /* 智能体聊天：消息与输入框 */
+
+  /* 字号阶梯：13 基准时 = 12 / 13 / 15 / 20，与原四档完全对齐 */
+  --fs-xs: calc(var(--font-ui) - 1px);
+  --fs-sm: var(--font-ui);
+  --fs-md: calc(var(--font-ui) + 2px);
+  --fs-lg: calc(var(--font-ui) + 7px);
 }
 
+/* ---------------- 深色（默认） ---------------- */
+:root,
 html[data-theme="dark"] {
-  --bg: #1e1e1e;
-  --bg-alt: #252526;
-  --bg-panel: #2d2d30;
-  --bg-hover: #3a3d41;
-  --text: #d4d4d4;
-  --text-dim: #9da0a6;
-  --border: #3c3c3c;
-  --accent: #4c8dff;
-  --accent-text: #10151c;
-  --mark: #6b5900;
-  --broken: #f85149;
-  --tag: #79b8ff;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
-  --code-bg: #2a2a2e;
-  --scrollbar: #4a4d52;
+  /* 表面：画布 / 面板 / 浮起行 */
+  --bg: #16181a;
+  --bg-alt: #1c1f21;
+  --bg-panel: #202426;
+  --bg-hover: #24282a;
+
+  /* 文本三级 */
+  --text: #ecefed;
+  --text-secondary: #a7afab;
+  --text-dim: #6f7874;
+
+  /* 微边框三档（1px 宽半透明 ≈ 0.5px 观感） */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-faint: rgba(255, 255, 255, 0.055);
+
+  /* 单一强调色：青绿 */
+  --accent: #35c9a6;
+  --accent-hover: #54e0be;
+  --accent-text: #0c1a17;
+  --accent-faint: rgba(53, 201, 166, 0.14);
+
+  /* 语义色 */
+  --broken: #f0616d;
+  --danger-text: #2a0b0e;
+  --success: #3fb950;
+  --mark: rgba(255, 199, 92, 0.26);
+  --tag: #c9d2cd;
+  --tag-bg: rgba(255, 255, 255, 0.07);
+
+  --code-bg: #24282a;
+  --scrollbar: rgba(255, 255, 255, 0.12);
+
+  /* 几何：控件 7 / 卡片 12 / 浮层外壳 12~16 */
+  --radius-sm: 6px;
+  --radius-md: 7px;
+  --radius-lg: 12px;
+
+  /* 阴影：只给离屏浮层 */
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.28);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.35);
+
   color-scheme: dark;
 }
 
-/* 主题切换即时生效 */
-body,
-.sidebar,
-.rightbar,
-.tabbar,
-.titlebar,
+/* ---------------- 浅色（同形状，暖白纸面） ---------------- */
+html[data-theme="light"] {
+  --bg: #fbfbf8;
+  --bg-alt: #f1f3ee;
+  --bg-panel: #e7eae3;
+  --bg-hover: #dfe3db;
+
+  --text: #1b1f1d;
+  --text-secondary: #59615c;
+  --text-dim: #6b746e;
+
+  --border: rgba(24, 32, 28, 0.14);
+  --border-strong: rgba(24, 32, 28, 0.26);
+  --border-faint: rgba(24, 32, 28, 0.08);
+
+  --accent: #0c7f6b;
+  --accent-hover: #0a6b5a;
+  --accent-text: #ffffff;
+  --accent-faint: rgba(12, 127, 107, 0.10);
+
+  --broken: #cf222e;
+  --danger-text: #ffffff;
+  --success: #1a7f37;
+  --mark: #ffe9a8;
+  --tag: #0c7f6b;
+  --tag-bg: rgba(12, 127, 107, 0.09);
+
+  --code-bg: #eff1ec;
+  --scrollbar: rgba(24, 32, 28, 0.20);
+
+  --radius-sm: 6px;
+  --radius-md: 7px;
+  --radius-lg: 12px;
+
+  --shadow: 0 1px 2px rgba(24, 32, 28, 0.06), 0 14px 38px rgba(24, 32, 28, 0.14);
+  --shadow-soft: 0 1px 2px rgba(24, 32, 28, 0.05);
+
+  color-scheme: light;
+}
+
+/* 主题切换平滑过渡 */
+body {
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+/* ---------------- 焦点环（WCAG AA，全局唯一实现点） ---------------- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.overlay__input:focus-visible {
+  outline: none;
+}
+
+/* ---------------- 等宽数字 ---------------- */
 .statusbar,
-.overlay__panel,
-.settings-page__panel,
-.btn,
-input,
-select,
-textarea {
-  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+.result-item__hotkey,
+.save-state,
+.kwey-key {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- kbd 键位样式 ---------------- */
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  vertical-align: baseline;
 }

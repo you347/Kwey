@@ -121,6 +121,10 @@ class VaultWatcher:
             service.eventbus.publish(VaultEvent(EventType.DELETED, path=rel))
             return
 
+        # B6：目录级新增/修改事件不是文件，不得登记进链接图 files 表
+        if not service.paths.to_abs(rel).is_file():
+            return
+
         existed = service.db.get_note(rel) is not None
         if is_md:
             service.indexer.reindex_note(rel)

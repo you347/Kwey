@@ -8,7 +8,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from app.api import deps
-from app.models import NoteCreateRequest, NoteUpdateRequest
+from app.models import NoteCreateRequest, NoteUpdateRequest, RenderRequest
+from app.parser.outline import extract_outline
 from app.parser.renderer import render_markdown
 from app.paths import normalize_rel
 
@@ -74,6 +75,18 @@ async def render_note(path: str):
     return {"code": 0, "data": {"html": html, "path": doc["path"], "title": doc["title"]}, "message": "ok"}
 
 
+@router.post("/note/render")
+async def render_note_content(req: RenderRequest):
+    """实时预览：渲染编辑器当前正文（未落盘），不改动磁盘内容。"""
+    vault = deps.require_vault()
+    linkgraph = deps.require_linkgraph()
+    doc = vault.read_note(req.path)
+    content = doc["content"] if req.content is None else req.content
+    resolver = lambda target, source=None: linkgraph.resolve(target)  # noqa: E731
+    html = render_markdown(content, resolve=resolver)
+    return {"code": 0, "data": {"html": html, "path": doc["path"], "title": doc["title"]}, "message": "ok"}
+
+
 @router.get("/note/embed")
 async def embed_note(path: str):
     """![[嵌入]] 内容块：md 渲染正文；图片直出 <img>；其他文件给链接。"""
@@ -98,3 +111,15 @@ async def embed_note(path: str):
             f'<a class="kwey-embed-file" href="/file/{rel}" data-type="{media}">{rel}</a>'
         )
     return {"code": 0, "data": {"html": html, "exists": True}, "message": "ok"}
+
+
+@router.get("/note/outline")
+async def note_outline(path: str):
+    """大纲：ATX 标题层级/文本/行号（跳过围栏代码块与行内代码）。"""
+    vault = deps.require_vault()
+    doc = vault.read_note(path)
+    return {
+        "code": 0,
+        "data": {"headings": extract_outline(doc["content"])},
+        "message": "ok",
+    }
