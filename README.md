@@ -186,7 +186,8 @@ python -m pytest tests/ -m perf -v    # 仅性能基准
 - **PDF 导出已落地**：`format=pdf` 走 reportlab（已在 requirements，纯 Python 开箱可用）或 weasyprint（可选，保真更高）；命令面板「导出当前笔记为 PDF」「打印 / 另存为 PDF」。无引擎时明确 400 并引导 `format=print`。
 - **F2 每日自动推送已接线**：设置页「每日自动推送」区块（开关/远端/分支/时间/提交模板/包含目录）+ 命令面板入口；启动与切换 vault 时自动补推，`pull --rebase` 冲突暂停。凭据交给系统 git credential helper。
 - **未实现**：F4 中的「会话式批量整理」已有 M2 organize 近似能力；真正未做的仅**移动端原生**。F1 编译、F2 推送、F3 记忆、F4 RAG/复习/剪藏/pulse、P2 Canvas/周期/插件/自定义 CSS/**Slides 幻灯片**均已落地（Slides：命令面板「演示当前笔记（幻灯片）」，按 `---` / `##` / `#` 分页，←→/空格翻页、Esc 退出）。
-- MCP 为自研最小 JSON-RPC（未装 `mcp` SDK 也可运行），22 个工具；stdio 本地管道无 token（父进程即信任边界）。
+- MCP 为自研最小 JSON-RPC（未装 `mcp` SDK 也可运行），23 个工具；stdio 本地管道无 token（父进程即信任边界）。**只有 stdio 传输**，无 Streamable HTTP（协议分发层 `KweyMCPServer.handle` 与传输解耦，加 HTTP 只需包一个路由）。
+- **写入归因**：写类工具都会把 `{role, name, action, path, ts}` 落到 `.kwey/agent-journal.jsonl`，可用 `GET /api/agent/audit?actor=<token名>` 或工具 `kwey.audit` 查询——外部 agent 用自己的 token 写入后可按名字定位它改过什么。
 - `/ws/events` 渐进式鉴权：带 `?token=` 严格校验三级 token（无效 close 4401 / 权限不足 4403）；无 token 仅本地回环放行（浏览器 UI / TestClient）。远端Exposure 前务必启用 token。
 - Provider 需在设置页配置 endpoint 才能用「指令生成 ops」；未配置时整理面板的本地规则（标签 / 建链）仍可用。
 - **API Key 输入框**：用可换行的 textarea（长 key 完整可见、默认圆点遮盖、可切「显示」）；设置页本地 UI 会自动 bootstrap token 并带 token 保存 Provider 配置——A4 鉴权后不带 token 会 401，已修复。

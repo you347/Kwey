@@ -47,3 +47,10 @@ Kwey：本地优先、Agent 原生的个人知识库软件（对标 Obsidian）�
 - 日志 `%LOCALAPPDATA%\Kwey\logs\kwey.log`，自检 `%LOCALAPPDATA%\Kwey\diag.json`；窗口化无控制台时 stdout/stderr 重定向到日志。
 - 产物 `release/Kwey/`（52.9MB）+ `release/Kwey-0.2.0-win64.zip`（27MB）；验证 910 passed。上线仍缺：安装器、代码签名、自动更新、LICENSE、图标、仓库提交清理。
 - 下一步：Wave B 集成（统一跑全量 pytest + 挂路由/命令/闭环钩子），再按 DESIGN.md 第七节推进 F1/F4 与 P2。
+
+## Verbot 集成（2026-11-19 定案）
+- Verbot = 独立多服务栈（FastAPI :8000 + Spring Boot :8082 + Vite :5175 + Tauri 壳），**无 MCP、无 OpenAI 兼容服务端**，是 OpenAI 协议的客户端。
+- 因此 **不做反向委派**（Kwey Provider 是同步 chat，Verbot 是异步任务 + WS，语义不匹配；薄 facade 等价直连百炼）。
+- 链路定为**单向**：Verbot → Kwey，走 REST 而非 MCP。Verbot 拉 `/api/agent/contract` 取 schema，手工裁 3~5 个工具注册进 `app/tools/registry.py`。
+- Kwey 的 MCP 只有 stdio；`KweyMCPServer.handle()` 与传输解耦，要加 Streamable HTTP 只是包一个路由（约 100 行），非必需不做。
+- 已补「写入归因」：写类工具落 `.kwey/agent-journal.jsonl`（role/name/action/path/ts），`GET /api/agent/audit?actor=<token名>` 与工具 `kwey.audit` 可查。工具数 23。

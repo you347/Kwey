@@ -291,6 +291,21 @@ def _history_log(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
     return {"entries": snap.log(rel=path or None, limit=a.get("limit", 50))}
 
 
+def _audit(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """写入归因查询：谁（actor）在什么时候改了什么路径。"""
+    root = vault.paths.ensure_root()
+    entries = journal.query(
+        root,
+        limit=int(a.get("limit", 50)),
+        actor=str(a.get("actor") or ""),
+        role=str(a.get("role") or ""),
+        action=str(a.get("action") or ""),
+        path=str(a.get("path") or ""),
+        since=float(a.get("since") or 0),
+    )
+    return {"entries": entries, "count": len(entries)}
+
+
 def _history_rollback(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
     if not a.get("confirm", False):
         raise ContractError(400, "回滚需要 confirm=true 显式确认")
@@ -556,6 +571,22 @@ _register(
         },
     },
     "read", "read", None, _history_log,
+)
+_register(
+    "kwey.audit",
+    "写入归因查询：按 actor(token 名字)/role/action/path/since 过滤 agent 写入日志，倒序返回 entries。",
+    {
+        "type": "object",
+        "properties": {
+            "actor": {"type": "string", "description": "调用方名字（token 的 name，如 verbot）；空为全部"},
+            "role": {"type": "string", "description": "角色过滤：read / write / admin", "enum": ["read", "write", "admin"]},
+            "action": {"type": "string", "description": "动作过滤，如 create / write / delete / move"},
+            "path": {"type": "string", "description": "路径子串过滤，如 'projects/'"},
+            "since": {"type": "number", "description": "起始 Unix 时间戳（秒）；0 为不限"},
+            "limit": {"type": "integer", "description": "返回条数上限（1-500，默认 50）", "minimum": 1, "maximum": 500},
+        },
+    },
+    "read", "read", None, _audit,
 )
 _register(
     "kwey.history.rollback",

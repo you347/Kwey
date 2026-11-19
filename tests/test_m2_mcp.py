@@ -31,7 +31,8 @@ EXPECTED_TOOLS = {
     "kwey.tags",
     "kwey.graph.query",
     "kwey.organize",
-    # W2：补齐工具矩阵（现 22 个，含 kwey.open）
+    # W2：补齐工具矩阵（现 23 个，含 kwey.open / kwey.audit）
+    "kwey.audit",
     "kwey.tree",
     "kwey.trash.list",
     "kwey.history.log",
@@ -85,7 +86,7 @@ def test_ping(vault):
 def test_tools_list(vault):
     resp = rpc(KweyMCPServer(vault), "tools/list", {})
     tools = resp["result"]["tools"]
-    assert len(tools) == 22
+    assert len(tools) == 23
     assert {t["name"] for t in tools} == EXPECTED_TOOLS
     for t in tools:
         assert isinstance(t["description"], str) and t["description"]
@@ -274,7 +275,7 @@ def test_stdio_entry(tmp_path):
     assert len(out_lines) == 3, f"stdout={proc.stdout!r}"
     assert json.loads(out_lines[0])["result"]["serverInfo"]["name"] == "kwey"
     assert json.loads(out_lines[1])["result"] == {}
-    assert len(json.loads(out_lines[2])["result"]["tools"]) == 22
+    assert len(json.loads(out_lines[2])["result"]["tools"]) == 23
 
 
 def test_stdio_help(tmp_path):

@@ -22,7 +22,7 @@ AGENT = "/api/agent"
 
 READ_TOOLS = {
     "kwey.search", "kwey.read", "kwey.open", "kwey.graph.query", "kwey.organize",
-    "kwey.tree", "kwey.trash.list", "kwey.history.log",
+    "kwey.tree", "kwey.trash.list", "kwey.history.log", "kwey.audit",
 }
 WRITE_TOOLS = {
     "kwey.create", "kwey.write", "kwey.delete", "kwey.link", "kwey.tags",

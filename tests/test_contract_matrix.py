@@ -58,12 +58,12 @@ def _h(token: str) -> dict:
 
 # ---------------------------------------------------------------- 矩阵规模与元数据
 def test_matrix_size_and_tiers():
-    assert len(ALL_TOOLS) == 22
-    assert len(READ_NAMES) == 8
+    assert len(ALL_TOOLS) == 23
+    assert len(READ_NAMES) == 9
     assert len(WRITE_NAMES) == 13
     assert len(ADMIN_NAMES) == 1
     assert ADMIN_NAMES == ["kwey.trash.purge"]
-    assert len(set(ALL_NAMES)) == 22
+    assert len(set(ALL_NAMES)) == 23
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=ALL_NAMES)

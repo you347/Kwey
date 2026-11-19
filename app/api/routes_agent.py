@@ -286,6 +286,32 @@ async def agent_graph(
     return _ok({"nodes": nodes, "edges": edges})
 
 
+@router.get("/audit")
+async def agent_audit(
+    request: Request,
+    actor: str = Query(default="", description="调用方名字（token 的 name，如 verbot）；空为全部"),
+    role: str = Query(default="", description="角色过滤：read / write / admin"),
+    action: str = Query(default="", description="动作过滤，如 create / write / delete / move"),
+    path: str = Query(default="", description="路径子串过滤，如 projects/"),
+    since: float = Query(default=0.0, description="起始 Unix 时间戳（秒）；0 为不限"),
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """写入归因：谁在什么时候改了哪个笔记（外部 agent 的 token name 即可定位）。"""
+    _auth(request, "read")
+    arguments: Dict[str, Any] = {"limit": limit}
+    if actor:
+        arguments["actor"] = actor
+    if role:
+        arguments["role"] = role
+    if action:
+        arguments["action"] = action
+    if path:
+        arguments["path"] = path
+    if since:
+        arguments["since"] = since
+    return _ok(_invoke("kwey.audit", arguments))
+
+
 # ---------------------------------------------------------------- SSE 端点
 def _sse_frame(data: Dict[str, Any]) -> str:
     """紧凑 JSON + SSE data 帧（首帧严格为 data: {\"event\":\"connected\"}\\n\\n）。"""
