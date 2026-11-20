@@ -38,6 +38,7 @@ Kwey：本地优先、Agent 原生的个人知识库软件（对标 Obsidian）�
 - 2026-11-16 Wave B（A4-A8 并行卡）：A4 权限治理、A5 CLI、A6 F1 知识编译、A7 **F3 个人信息库**（已完成：app/memory/store.py + routes_memory + memory.js，命令 `memory.open`，三分区 50/30/20 注入，待集成卡接线 server.py/app.js）、A8 上下文工程。F2 已于 11-14 完成。
 - 2026-11-16 Wave C：C1 **P2 Canvas 无限画布**（已完成：`app/api/routes_canvas.py` + `static/js/canvas.js`，命令 `canvas.open`，Obsidian 兼容 .canvas JSON，待集成卡挂 router/init）。
 - 未实现：Chroma 向量混合检索（`mode=hybrid` 仍等同 fts）、F4 构思。（P1-19 分屏、PDF 导出、P2 Slides/Canvas 已完成）
+- 2026-11-20 **F2 补应用内绑定**：设置页填仓库地址 → 后端 `git remote add/set-url`（只写 `.git/config`，Kwey json 只存 remote 名）；`GET /api/autopush/remotes`、`POST /api/autopush/bind`；`branch` 默认空 = 跟随当前分支（`_effective_branch()`）。原则：不存凭据 ≠ 不给入口。
 
 ## 打包与发布（2026-11-19）
 - 版本 **0.2.0**（单一真源 `app/__init__.py:__version__`，server.py 与 MCP SERVER_INFO 均引用它）。

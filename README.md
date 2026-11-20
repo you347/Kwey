@@ -63,7 +63,7 @@
 | A8 | **上下文工程**：master index + FTS/向量召回 + 双向图扩展，按预算组装；sources 可溯源 | `GET /api/context/build?query=&max_chars=`；`build_context(vault, query, ...)` 供 A6/A7 复用 |
 | A2 | **混合检索解锁**：`mode=hybrid` 真做 FTS+向量+图 RRF；settings.vector 可写、缺 chromadb 自动降级；MCP `kwey.search` 同走 hybrid | 设置页「向量检索」开关/模型/权重/重建；`GET /api/search/vector/status`、`POST /api/search/vector/rebuild` |
 | WS 鉴权 | A4 遗留落地：`/ws/events?token=` 三级校验，无效 close 4401 / 越权 4403；无 token 仅本地回环放行 | 浏览器 UI 无感知；远端需带 token |
-| F2 | **每日自动推送**：启动/切 vault 自动补推，`pull --rebase` 冲突暂停、下次启动补推 | 设置页「每日自动推送」区块；`/api/autopush/config|run|status`；命令 `autopush.run` |
+| F2 | **每日自动推送**：启动/切 vault 自动补推，`pull --rebase` 冲突暂停、下次启动补推；设置页可直接绑定仓库地址（写 `.git/config`，凭据交给系统 git） | 设置页「每日自动推送」区块（地址/绑定/远端/分支/时间/模板/包含目录）；`/api/autopush/config|run|status|remotes|bind`；命令 `autopush.run` |
 | PDF | **PDF / 打印导出**：reportlab 开箱、weasyprint 可选增强；图片 base64 内联 | 命令「导出当前笔记为 PDF」「打印 / 另存为 PDF」；`GET /api/export?format=pdf|print` |
 
 - 新命令面板入口：F1 知识编译、个人信息库、自动推送、导出 PDF / 打印；新浮层 `#overlay-compile` 与记忆面板（自绘 DOM）。
@@ -184,7 +184,7 @@ python -m pytest tests/ -m perf -v    # 仅性能基准
 - 编辑器为 **CodeMirror 5**（vendored）；`split` 指同一篇笔记的源码+预览并排；**P1-19 两篇独立笔记对照编辑已实现**：`Ctrl+Shift+S` / 工具栏分屏按钮 / 文件树与标签右键「在右屏打开」，副屏有独立标签栏、独立编辑器实例与独立保存（`splitview.js` + `tabs.paneState('secondary')`）。
 - FTS5 中文为按字切分；`/api/search?mode=hybrid` 已做 FTS+向量+链接图 RRF 融合，但默认无 `chromadb`，此时**自动降级为纯 FTS**（结果等价、返回 `data.vector.backend="null"`）。设置页「向量检索」可开启并重建索引；模型填 `hashing` 用免下载词向量，填 `bge-small-zh-v1.5` 需先装 `sentence-transformers`（首次联网下载）。
 - **PDF 导出已落地**：`format=pdf` 走 reportlab（已在 requirements，纯 Python 开箱可用）或 weasyprint（可选，保真更高）；命令面板「导出当前笔记为 PDF」「打印 / 另存为 PDF」。无引擎时明确 400 并引导 `format=print`。
-- **F2 每日自动推送已接线**：设置页「每日自动推送」区块（开关/远端/分支/时间/提交模板/包含目录）+ 命令面板入口；启动与切换 vault 时自动补推，`pull --rebase` 冲突暂停。凭据交给系统 git credential helper。
+- **F2 每日自动推送已接线**：设置页「每日自动推送」区块（仓库地址 + 绑定按钮、开关、远端、分支、时间、提交模板、包含目录）+ 命令面板入口；启动与切换 vault 时自动补推，`pull --rebase` 冲突暂停。远端地址在应用内绑定（写入仓库 `.git/config`），凭据交给系统 git credential helper；分支留空自动跟随当前分支。
 - **未实现**：F4 中的「会话式批量整理」已有 M2 organize 近似能力；真正未做的仅**移动端原生**。F1 编译、F2 推送、F3 记忆、F4 RAG/复习/剪藏/pulse、P2 Canvas/周期/插件/自定义 CSS/**Slides 幻灯片**均已落地（Slides：命令面板「演示当前笔记（幻灯片）」，按 `---` / `##` / `#` 分页，←→/空格翻页、Esc 退出）。
 - MCP 为自研最小 JSON-RPC（未装 `mcp` SDK 也可运行），23 个工具；stdio 本地管道无 token（父进程即信任边界）。**只有 stdio 传输**，无 Streamable HTTP（协议分发层 `KweyMCPServer.handle` 与传输解耦，加 HTTP 只需包一个路由）。
 - **写入归因**：写类工具都会把 `{role, name, action, path, ts}` 落到 `.kwey/agent-journal.jsonl`，可用 `GET /api/agent/audit?actor=<token名>` 或工具 `kwey.audit` 查询——外部 agent 用自己的 token 写入后可按名字定位它改过什么。

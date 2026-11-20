@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.api import deps, routes_autopush
 from app.server import create_app
-from app.vault.autopush import AutoPushService
+from app.vault.autopush import AutoPushService, _check_remote_url
 
 
 def epoch(h: int, mi: int, day: int = 14) -> float:
@@ -104,7 +104,7 @@ def test_defaults_when_missing(svc):
     cfg = svc.get_config()
     assert cfg["enabled"] is False
     assert cfg["remote"] == "origin"
-    assert cfg["branch"] == "main"
+    assert cfg["branch"] == ""      # 空 = 跟随仓库当前分支
     assert cfg["time"] == "22:00"
     assert cfg["include_dirs"] == []
     assert cfg["last_push"] == 0
@@ -142,7 +142,7 @@ def test_update_partial_keeps_others(svc):
     svc.update_config({"remote": "gitee"})
     cfg = svc.get_config()
     assert cfg["remote"] == "gitee"
-    assert cfg["branch"] == "main"
+    assert cfg["branch"] == ""
     assert cfg["time"] == "22:00"
 
 
@@ -497,3 +497,192 @@ def test_vault_switch_stops_old_timer(repo_root, tmp_path):
     svc2 = routes_autopush._get_autopush(vault2)
     assert svc2 is not svc1
     assert svc1._timer is None  # 旧 vault 定时器已停，不会向旧仓库推送
+
+
+# ------------------------------------------------------------------ 远端地址校验
+@pytest.mark.parametrize("url", [
+    "git@gitee.com:ye-jun-hao55/kwey-vault.git",
+    "https://gitee.com/ye-jun-hao55/kwey-vault.git",
+    "ssh://git@github.com/u/r.git",
+    "git://example.com/r.git",
+    "file:///D:/vaults/backup.git",
+])
+def test_check_remote_url_accepts(url):
+    clean, warning = _check_remote_url(url)
+    assert clean == url
+    assert warning is None
+
+
+@pytest.mark.parametrize("url", [
+    "", "   ", "-u x", "ftp://example.com/r.git", "https://a b/r.git",
+    "https://example.com/" + "x" * 600, "just-a-path",
+])
+def test_check_remote_url_rejects(url):
+    with pytest.raises(ValueError):
+        _check_remote_url(url)
+
+
+def test_check_remote_url_warns_userinfo():
+    clean, warning = _check_remote_url("https://user:token@github.com/u/r.git")
+    assert clean.startswith("https://user:token@")
+    assert warning and "口令" in warning
+
+
+# ------------------------------------------------------------------ 远端绑定
+def make_bind_fake(remote_v="", branch="master") -> FakeGit:
+    """绑定场景替身：remote -v 规则必须排在 remote 之前（前缀匹配先到先得）。"""
+    fake = FakeGit()
+    fake.set(["--version"], 0, "git version 2.45.0")
+    fake.set(["remote", "-v"], 0, remote_v)
+    fake.set(["remote"], 0, "origin\n" if remote_v else "")
+    fake.set(["rev-parse", "--abbrev-ref", "HEAD"], 0, f"{branch}\n")
+    return fake
+
+
+def test_bind_remote_adds_new(svc, monkeypatch):
+    fake = make_bind_fake()
+    monkeypatch.setattr(subprocess, "run", fake)
+    data = svc.bind_remote("git@gitee.com:u/v.git")
+    assert data["name"] == "origin"
+    assert data["replaced"] is False
+    assert data["warning"] is None
+    assert fake.find(["remote", "add"])[0][0] == (
+        "remote", "add", "origin", "git@gitee.com:u/v.git")
+    assert svc.get_config()["remote"] == "origin"
+    assert all(c[1] == svc.root for c in fake.calls)   # git 一律 cwd=vault root
+
+
+def test_bind_remote_existing_requires_replace(svc, monkeypatch):
+    fake = make_bind_fake(remote_v="origin\tgit@old:r.git (fetch)\norigin\tgit@old:r.git (push)\n")
+    monkeypatch.setattr(subprocess, "run", fake)
+    with pytest.raises(ValueError, match="已存在"):
+        svc.bind_remote("git@new:r.git")
+    assert fake.find(["remote", "set-url"]) == []
+    assert fake.find(["remote", "add"]) == []
+
+
+def test_bind_remote_replaces_url(svc, monkeypatch):
+    fake = make_bind_fake(remote_v="origin\tgit@old:r.git (fetch)\n")
+    monkeypatch.setattr(subprocess, "run", fake)
+    data = svc.bind_remote("git@new:r.git", replace=True)
+    assert data["replaced"] is True
+    assert fake.find(["remote", "set-url"])[0][0] == (
+        "remote", "set-url", "origin", "git@new:r.git")
+
+
+def test_bind_remote_same_url_not_replaced(svc, monkeypatch):
+    url = "git@old:r.git"
+    fake = make_bind_fake(remote_v=f"origin\t{url} (fetch)\norigin\t{url} (push)\n")
+    monkeypatch.setattr(subprocess, "run", fake)
+    data = svc.bind_remote(url, replace=True)
+    assert data["replaced"] is False
+    assert fake.find(["remote", "set-url"]) == []
+
+
+def test_bind_remote_syncs_remote_name(svc, monkeypatch):
+    fake = make_bind_fake()
+    monkeypatch.setattr(subprocess, "run", fake)
+    data = svc.bind_remote("git@x:y.git", name="backup")
+    assert data["name"] == "backup"
+    assert svc.get_config()["remote"] == "backup"
+
+
+def test_bind_remote_rejects_bad_name(svc, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", make_bind_fake())
+    with pytest.raises(ValueError, match="远端名"):
+        svc.bind_remote("git@x:y.git", name="-x")
+
+
+def test_bind_remote_requires_repo(vault_dir, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", make_bind_fake())
+    service = AutoPushService(vault_dir)   # 无 .git
+    with pytest.raises(ValueError, match="git 仓库"):
+        service.bind_remote("git@x:y.git")
+
+
+def test_list_remotes_parses_fetch_and_push(svc, monkeypatch):
+    fake = make_bind_fake(
+        remote_v="origin\tgit@a:r.git (fetch)\norigin\tgit@b:r.git (push)\n"
+                 "backup\thttps://x/r.git (fetch)\nbackup\thttps://x/r.git (push)\n"
+    )
+    monkeypatch.setattr(subprocess, "run", fake)
+    remotes = {r["name"]: r for r in svc.list_remotes()}
+    assert remotes["origin"]["url"] == "git@a:r.git"
+    assert remotes["origin"]["push_url"] == "git@b:r.git"
+    assert remotes["backup"]["push_url"] == "https://x/r.git"
+
+
+def test_current_branch_and_detached(svc, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", make_bind_fake(branch="master"))
+    assert svc.current_branch() == "master"
+    monkeypatch.setattr(subprocess, "run", make_bind_fake(branch="HEAD"))
+    assert svc.current_branch() == ""
+
+
+def test_effective_branch_prefers_config(svc, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", make_bind_fake(branch="master"))
+    assert svc._effective_branch() == "master"     # 空配置 → 当前分支
+    svc.update_config({"branch": "release"})
+    assert svc._effective_branch() == "release"
+    assert svc.status()["effective_branch"] == "release"
+
+
+def test_pipeline_pushes_effective_branch(svc, monkeypatch):
+    fake = make_fake()
+    fake.set(["rev-parse", "--abbrev-ref", "HEAD"], 0, "master\n")
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert svc.run()["status"] == "pushed"
+    pull = fake.find(["pull"])[0][0]
+    assert pull[-2:] == ("origin", "master")       # 不再硬编码 main
+    assert fake.find(["push"])[0][0][-2:] == ("origin", "master")
+
+
+# ------------------------------------------------------------------ 绑定 API
+def test_api_remotes_empty(ap_client, vault_dir, monkeypatch):
+    (vault_dir / ".git").mkdir()
+    monkeypatch.setattr(subprocess, "run", make_bind_fake(branch="master"))
+    data = ap_client.get("/api/autopush/remotes").json()["data"]
+    assert data["repo"] is True
+    assert data["git_available"] is True
+    assert data["remotes"] == []
+    assert data["current_branch"] == "master"
+
+
+def test_api_bind_roundtrip(ap_client, vault_dir, monkeypatch):
+    (vault_dir / ".git").mkdir()
+    fake = make_bind_fake()
+    monkeypatch.setattr(subprocess, "run", fake)
+    res = ap_client.post("/api/autopush/bind", json={"url": "git@gitee.com:u/v.git"})
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["name"] == "origin"
+    assert data["replaced"] is False
+    assert data["url"] == "git@gitee.com:u/v.git"
+    assert ap_client.get("/api/autopush/config").json()["data"]["remote"] == "origin"
+
+
+def test_api_bind_invalid_url_400(ap_client, vault_dir, monkeypatch):
+    (vault_dir / ".git").mkdir()
+    monkeypatch.setattr(subprocess, "run", make_bind_fake())
+    res = ap_client.post("/api/autopush/bind", json={"url": "ftp://x/r.git"})
+    assert res.status_code == 400
+    assert res.json()["code"] == 400
+    assert "不支持" in res.json()["message"]
+
+
+def test_api_bind_userinfo_returns_warning(ap_client, vault_dir, monkeypatch):
+    (vault_dir / ".git").mkdir()
+    monkeypatch.setattr(subprocess, "run", make_bind_fake())
+    res = ap_client.post("/api/autopush/bind", json={
+        "url": "https://user:token@github.com/u/r.git",
+    })
+    assert res.status_code == 200
+    assert "口令" in res.json()["data"]["warning"]
+
+
+def test_api_status_has_effective_branch(ap_client, vault_dir, monkeypatch):
+    (vault_dir / ".git").mkdir()
+    monkeypatch.setattr(subprocess, "run", make_bind_fake(branch="master"))
+    data = ap_client.get("/api/autopush/status").json()["data"]
+    assert data["branch"] == ""
+    assert data["effective_branch"] == "master"

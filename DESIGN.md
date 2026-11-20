@@ -136,8 +136,12 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 
 ### F2 每日自动推送 Gitee / GitHub
 - vault 级开关：勾选启用的仓库才推送；配置 remote（Gitee/GitHub）、branch、推送时间、commit message 模板、包含目录
-- 实现：GitPython + 应用内定时器（APScheduler）；应用未运行时下次启动补推（对比 last_push 时间戳）
-- push 前自动 pull --rebase，冲突时暂停并提示手动处理；token 存系统 keyring
+- 实现：subprocess 调系统 git + threading.Timer（零新依赖）；应用未运行时下次启动补推（对比 last_push 时间戳）
+- push 前自动 pull --rebase，冲突时暂停并提示手动处理
+- **远端绑定在应用内完成**：设置页填仓库地址 → 后端执行 `git remote add/set-url`，地址写进 `.git/config`（随仓库迁移），Kwey 自己的 json 只存 remote 名
+  - 凭据不进 Kwey：认证交给系统 git credential helper（Windows 凭据管理器 / keychain / libsecret）
+  - 地址若内嵌 userinfo（`https://user:token@…`）不阻断但返回警告，建议改用 SSH
+  - branch 留空 = 跟随仓库当前分支（避免 main/master 硬编码错位）
 - 定位：免费版"Obsidian Sync"，Gitee 国内快
 
 ### F3 AI 智能个人信息库（个性化根基）

@@ -235,11 +235,23 @@ export const GROUPS = [
         title: '每日自动推送',
         id: 'autopush-section',
         desc: '应用未运行时下次启动自动补推；push 前先 pull --rebase',
-        note: '冲突时暂停等待手动处理；凭据交给系统 git credential helper，此处不采集 token。',
+        note: '冲突时暂停等待手动处理；地址写入仓库 .git/config，凭据交给系统 git credential helper，此处不采集 token。',
         rows: [
+          {
+            type: 'text', id: 'autopush-remote-url', label: '仓库地址',
+            placeholder: 'git@gitee.com:you/vault.git',
+            hint: { id: 'autopush-bind-hint', text: '正在读取绑定状态…' },
+          },
+          {
+            type: 'action',
+            buttons: [{ id: 'autopush-bind', text: '绑定仓库', variant: 'primary' }],
+          },
           { type: 'switch', id: 'autopush-enabled', label: '启用每日推送' },
-          { type: 'text', id: 'autopush-remote', label: '远端', placeholder: 'origin' },
-          { type: 'text', id: 'autopush-branch', label: '分支', placeholder: 'main' },
+          {
+            type: 'select', id: 'autopush-remote', label: '远端',
+            options: [['origin', 'origin']],
+          },
+          { type: 'text', id: 'autopush-branch', label: '分支', placeholder: '留空 = 当前分支' },
           { type: 'text', id: 'autopush-time', label: '推送时间', inputType: 'time', placeholder: '22:00' },
           {
             type: 'text', id: 'autopush-commit-template', label: '提交信息模板',

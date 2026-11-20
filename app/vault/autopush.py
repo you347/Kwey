@@ -9,6 +9,11 @@
 认证完全交给系统 git credential helper（Windows 凭据管理器 / macOS keychain /
 libsecret），明文 token 永不落盘到 Kwey 的任何文件。
 
+远端绑定：``bind_remote()`` 让用户在设置页直接填仓库地址，执行 ``git remote
+add/set-url`` —— 地址写进 ``.git/config``（git 自己的位置，随仓库一起迁移），
+Kwey 的 json 里不复制一份。地址若内嵌 userinfo（``https://user:token@...``）
+不阻断但返回警告：那是明文凭据，建议改用 SSH 或 credential helper。
+
 调度语义：
 - 每天本地时间 ``time``（HH:MM）触发一次；应用未运行时错过的计划，下次启动
   对比 ``last_push`` 与最近一个已过去的计划时刻补推。
@@ -40,7 +45,7 @@ CONFIG_FILENAME = "autopush.json"
 DEFAULTS: Dict[str, Any] = {
     "enabled": False,
     "remote": "origin",
-    "branch": "main",
+    "branch": "",                # 空 = 跟随仓库当前分支（不再硬编码 main）
     "time": "22:00",
     "commit_template": "vault backup {date}",
     "include_dirs": [],          # 空 = 整个 vault
@@ -52,8 +57,45 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _REMOTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
+# 远端地址：只接受这些传输方式；scp 风格的 git@host:path 单独匹配
+_URL_PREFIXES = ("https://", "http://", "ssh://", "git://", "file://")
+_SCP_LIKE_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]+$")
+# scheme://userinfo@host —— userinfo 可能是明文账号口令
+_USERINFO_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]+@")
+MAX_URL_LEN = 500
+
 # git status --porcelain 的未合并（冲突）状态码
 _UNMERGED = ("UU", "AA", "DD", "AU", "UA", "DU", "UD")
+
+
+def _check_remote_url(raw: str) -> Tuple[str, Optional[str]]:
+    """校验远端地址；返回 (规范化地址, 警告文案或 None)。
+
+    Raises:
+        ValueError: 空地址、超长、含空白/控制字符、协议不支持、以 '-' 开头。
+    """
+    url = str(raw or "").strip()
+    if not url:
+        raise ValueError("仓库地址不能为空")
+    if len(url) > MAX_URL_LEN:
+        raise ValueError(f"仓库地址过长（最多 {MAX_URL_LEN} 字符）")
+    if any(ch.isspace() or ord(ch) < 0x20 for ch in url):
+        raise ValueError("仓库地址不能包含空格或控制字符")
+    if url.startswith("-"):
+        raise ValueError("仓库地址不能以 '-' 开头")
+    if not (url.startswith(_URL_PREFIXES) or _SCP_LIKE_RE.fullmatch(url)):
+        raise ValueError(
+            "不支持的地址格式（支持 https://… 、ssh://… 、git@host:path）"
+        )
+    warning = None
+    # ssh://git@host 的 userinfo 是标准用户名，无需警告；http(s) 的 userinfo
+    # 常被用来内嵌账号口令（PAT），值得提醒一句。
+    if url.lower().startswith(("http://", "https://")) and _USERINFO_RE.match(url):
+        warning = (
+            "地址内含账号/口令（userinfo），会原样写入 .git/config；"
+            "建议改用 SSH 地址或由系统 git 凭据管理器保存口令"
+        )
+    return url, warning
 
 
 def _validate(updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,6 +108,9 @@ def _validate(updates: Dict[str, Any]) -> Dict[str, Any]:
             clean[key] = bool(value)
         elif key in ("remote", "branch"):
             v = str(value).strip()
+            if key == "branch" and v == "":
+                clean[key] = ""            # 空 = 跟随仓库当前分支
+                continue
             pattern = _REMOTE_RE if key == "remote" else _BRANCH_RE
             if not pattern.fullmatch(v) or ".." in v:
                 raise ValueError(f"非法 {key}: {value!r}")
@@ -275,6 +320,97 @@ class AutoPushService:
             return False
         return result.returncode == 0
 
+    @property
+    def repo_exists(self) -> bool:
+        return (self.root / ".git").exists()
+
+    def current_branch(self) -> str:
+        """仓库当前分支名；无仓库 / 分离 HEAD / 出错时返回空串。"""
+        if not self.repo_exists:
+            return ""
+        try:
+            out = self._git(
+                ["rev-parse", "--abbrev-ref", "HEAD"], ok_codes=(0, 128)
+            ).stdout.strip()
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            return ""
+        return "" if out in ("", "HEAD") else out
+
+    def _effective_branch(self, cfg: Optional[Dict[str, Any]] = None) -> str:
+        """实际推送分支：配置优先，空则取当前分支，最后兜底 main。"""
+        cfg = cfg if cfg is not None else self.get_config()
+        return (cfg.get("branch") or "").strip() or self.current_branch() or "main"
+
+    def list_remotes(self) -> List[Dict[str, str]]:
+        """枚举已绑定的远端：[{name, url, push_url}]；无仓库或无 git 返回空表。"""
+        if not self.repo_exists or not self._git_available():
+            return []
+        try:
+            out = self._git(["remote", "-v"]).stdout
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            return []
+        remotes: Dict[str, Dict[str, str]] = {}
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            name, url, kind = parts[0], parts[1], parts[2].strip("()")
+            item = remotes.setdefault(name, {"name": name, "url": "", "push_url": ""})
+            if kind == "push":
+                item["push_url"] = url
+            else:
+                item["url"] = url
+        for item in remotes.values():
+            item["push_url"] = item["push_url"] or item["url"]
+            item["url"] = item["url"] or item["push_url"]
+        return list(remotes.values())
+
+    def bind_remote(
+        self, url: str, name: str = "origin", replace: bool = False
+    ) -> Dict[str, Any]:
+        """绑定（或替换）远端地址：写 ``.git/config``，不复制到 Kwey 配置。
+
+        Args:
+            url: 仓库地址（https/ssh/git/file 或 git@host:path）。
+            name: 远端名，默认 origin。
+            replace: 已存在同名远端时是否改地址；False 则报错让用户确认。
+
+        Returns:
+            ``{name, url, replaced, warning, remotes}``；warning 为凭据提示或 None。
+
+        Raises:
+            ValueError: 地址/名字非法、无 git 仓库、同名远端已存在且未允许替换。
+        """
+        clean_url, warning = _check_remote_url(url)
+        name = str(name or "origin").strip()
+        if not _REMOTE_RE.fullmatch(name):
+            raise ValueError(f"非法远端名: {name!r}")
+        if not self._git_available():
+            raise ValueError("系统未安装 git，无法绑定远端")
+        if not self.repo_exists:
+            raise ValueError("vault 尚未初始化 git 仓库（请先在设置中开启 git 快照）")
+
+        existing = {item["name"]: item for item in self.list_remotes()}
+        replaced = False
+        if name in existing:
+            if not replace:
+                raise ValueError(
+                    f"远端 {name} 已存在（{existing[name]['url'] or '地址未知'}）；"
+                    "如需更换地址请确认替换"
+                )
+            if existing[name]["url"] != clean_url:
+                self._git(["remote", "set-url", name, clean_url])
+                replaced = True
+        else:
+            self._git(["remote", "add", name, clean_url])
+
+        if self.get_config()["remote"] != name:
+            self.update_config({"remote": name})
+        return {
+            "name": name, "url": clean_url, "replaced": replaced,
+            "warning": warning, "remotes": self.list_remotes(),
+        }
+
     def _has_conflict(self, stderr: str) -> bool:
         if "conflict" in stderr.lower():
             return True
@@ -336,13 +472,14 @@ class AutoPushService:
             return fail("vault 尚未初始化 git 仓库（请先在设置中开启 git 快照）")
 
         cfg = self.get_config()
-        remote, branch = cfg["remote"], cfg["branch"]
+        remote, branch = cfg["remote"], self._effective_branch(cfg)
         committed, commit_hash = False, None
         try:
             if remote not in self._git(["remote"]).stdout.split():
                 return fail(
                     f"remote 不存在: {remote}"
-                    f"（先在 vault 中执行 git remote add {remote} <url>）"
+                    f"（请在「设置 → 同步 → 每日自动推送」绑定仓库地址，"
+                    f"或执行 git remote add {remote} <url>）"
                 )
             # 1) 暂存 + 提交（include_dirs 为空 = 全库）
             dirs = cfg["include_dirs"]
@@ -371,8 +508,10 @@ class AutoPushService:
                 if "couldn't find remote ref" not in low and "no such ref" not in low:
                     return fail(f"pull --rebase 失败（未推送）: {stderr or '未知错误'}")
                 # 远端分支尚不存在：首次推送，直接 push 建分支
-            # 3) 推送
-            push = self._git(["push", remote, branch], ok_codes=(0, 1, 128), timeout=180)
+            # 3) 推送（-u 让 vault 里的手动 git push/pull 也不必再敲分支名）
+            push = self._git(
+                ["push", "--set-upstream", remote, branch], ok_codes=(0, 1, 128), timeout=180
+            )
             if push.returncode != 0:
                 return fail(f"push 失败: {(push.stderr or '').strip() or '未知错误'}")
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
@@ -399,6 +538,7 @@ class AutoPushService:
             "state": state,
             "remote": cfg["remote"],
             "branch": cfg["branch"],
+            "effective_branch": self._effective_branch(cfg),
             "time": cfg["time"],
             "next_run": nxt,
             "next_run_iso": _iso(nxt),
@@ -407,6 +547,6 @@ class AutoPushService:
             "last_result": last_result,
             "catchup_pending": self.needs_catchup(),
             "git_available": self._git_available(),
-            "repo": (self.root / ".git").exists(),
+            "repo": self.repo_exists,
             "scheduled": scheduled,
         }
