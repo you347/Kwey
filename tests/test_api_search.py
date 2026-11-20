@@ -83,3 +83,41 @@ class TestPerformance:
         elapsed = (time.perf_counter() - started) * 1000
         assert resp.status_code == 200
         assert elapsed <= 300, f"切换器耗时 {elapsed:.1f}ms 超标"
+
+
+class TestHyphenatedTokens:
+    """连字符/下划线/点在 unicode61 里是分隔符（Verbot 联调发现）。
+
+    旧实现把 ASCII 词的非 \\w 字符删掉再粘合：PET-KWEY-SMOKE → PETKWEYSMOKE*，
+    而索引里是 pet/kwey/smoke 三个 token，永远 0 命中——语法合法、静默失效。
+    """
+
+    def test_match_terms_split_on_hyphen(self):
+        from app.api.routes_search import build_match_terms
+
+        assert build_match_terms(["PET-KWEY-SMOKE"]) == ["PET*", "KWEY*", "SMOKE*"]
+
+    def test_match_terms_split_on_underscore_and_dot(self):
+        from app.api.routes_search import build_match_terms
+
+        assert build_match_terms(["foo_bar"]) == ["foo*", "bar*"]
+        assert build_match_terms(["v1.2.3"]) == ["v1*", "2*", "3*"]
+
+    def test_pure_punctuation_yields_no_term(self):
+        from app.api.routes_search import build_match_terms
+
+        assert build_match_terms(["+++"]) == []
+        assert build_match_terms(["AND"]) == ['"AND"']
+
+    def test_hyphenated_identifier_is_searchable(self, client, vault):
+        from app.agent import registry
+
+        registry.invoke(
+            "kwey.create",
+            {"path": "probe-hyphen.md", "content": "标识符 PET-KWEY-SMOKE 用于回归探针。"},
+            vault=vault,
+        )
+        data = client.get(
+            "/api/search", params={"q": "PET-KWEY-SMOKE", "mode": "fts"}
+        ).json()["data"]
+        assert any(h["path"] == "probe-hyphen.md" for h in data["hits"])

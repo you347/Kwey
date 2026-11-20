@@ -23,8 +23,10 @@ logger = logging.getLogger("kwey.search")
 router = APIRouter(prefix="/api", tags=["search"])
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
-# ASCII 词只保留字母/数字/下划线（B1 修复：彻底剥离 *、引号、括号等一切 FTS5 语法字符）
-_ASCII_TERM_RE = re.compile(r"[^\w]+")
+# ASCII 词按「非字母数字」切分，与 unicode61 分词规则对齐：连字符 / 下划线 / 点号
+# 在索引侧都是分隔符，查询侧若把它们删掉粘合，就会得到永不命中的 token
+# （PET-KWEY-SMOKE 被索引成 pet/kwey/smoke，粘合成 PETKWEYSMOKE* 则 0 结果）。
+_ASCII_SPLIT_RE = re.compile(r"[\W_]+")
 # FTS5 保留关键字：作 bareword 会引发语法错误，需转引号短语（B1 修复）
 FTS_RESERVED = {"and", "or", "not", "near"}
 # CJK/普通词的合法字符（含空格，供按字切分）
@@ -45,8 +47,8 @@ def build_match_terms(terms: List[str]) -> List[str]:
     """用户检索词 → FTS5 MATCH 片段（B1 修复：消毒后保证任意输入不产生语法错误）。
 
     - 含 CJK：剥离非法字符 → 按字切分为引号短语（引号内为纯 token，杜绝注入）。
-    - ASCII：只保留 \\w 字符；保留字（AND/OR/NOT/NEAR）转引号短语；
-      其余安全词用 `term*` 前缀匹配。
+    - ASCII：按非字母数字切分为多个词（与 unicode61 分词对齐，连字符/下划线不粘合）；
+      保留字（AND/OR/NOT/NEAR）转引号短语；其余词用 `term*` 前缀匹配。
     - 清洗后为空的词直接丢弃。
     """
     match_terms: List[str] = []
@@ -60,13 +62,12 @@ def build_match_terms(terms: List[str]) -> List[str]:
             if phrase:
                 match_terms.append(f'"{phrase}"')
         else:
-            word = _ASCII_TERM_RE.sub("", term)
-            if not word:
-                continue
-            if word.lower() in FTS_RESERVED:
-                match_terms.append(f'"{word}"')  # 引号短语 → 不再是关键字
-            else:
-                match_terms.append(f"{word}*")   # 安全 bareword 前缀匹配
+            words = [w for w in _ASCII_SPLIT_RE.split(term) if w]
+            for word in words:
+                if word.lower() in FTS_RESERVED:
+                    match_terms.append(f'"{word}"')  # 引号短语 → 不再是关键字
+                else:
+                    match_terms.append(f"{word}*")   # 安全 bareword 前缀匹配
     return match_terms
 
 
