@@ -69,8 +69,10 @@ class TestVectorEndpoints:
         assert data["available"] is False
         assert "enabled" in data and "count" in data
 
-    def test_rebuild_without_chroma_degrades(self, client, monkeypatch):
+    def test_rebuild_without_backend_degrades(self, client, monkeypatch):
+        """三种后端全不可用 → NullBackend（hybrid 等价纯 FTS，不抛错）。"""
         monkeypatch.setattr(vec_mod, "_chroma_installed", lambda: False)
+        monkeypatch.setattr(vec_mod, "_sqlite_vec_available", lambda: False)
         client.put("/api/settings", json={"vector": {"enabled": True}})
         data = _body(client.post("/api/search/vector/rebuild", json={}))
         assert data["enabled"] is True

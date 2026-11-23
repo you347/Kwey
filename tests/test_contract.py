@@ -23,11 +23,15 @@ AGENT = "/api/agent"
 READ_TOOLS = {
     "kwey.search", "kwey.read", "kwey.open", "kwey.graph.query", "kwey.organize",
     "kwey.tree", "kwey.trash.list", "kwey.history.log", "kwey.audit",
+    # W4：结构化视图 / 知识体检
+    "kwey.views.list", "kwey.views.query", "kwey.diagnose",
 }
 WRITE_TOOLS = {
     "kwey.create", "kwey.write", "kwey.delete", "kwey.link", "kwey.tags",
     "kwey.append", "kwey.move", "kwey.rename", "kwey.dir.create", "kwey.dir.delete",
     "kwey.trash.restore", "kwey.history.rollback", "kwey.organize.apply",
+    # W4：视图落盘 / 快速捕获
+    "kwey.views.save", "kwey.capture",
 }
 ADMIN_TOOLS = {"kwey.trash.purge"}
 EXPECTED_TOOLS = READ_TOOLS | WRITE_TOOLS | ADMIN_TOOLS

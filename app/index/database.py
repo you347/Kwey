@@ -70,6 +70,14 @@ DDL = [
     """
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)
     """,
+    # 结构化视图（Bases）：frontmatter 原样 JSON 入索引，避免每次查询读盘解析。
+    # 属于可重建索引，永不作为事实源。
+    """
+    CREATE TABLE IF NOT EXISTS props (
+        note_path TEXT PRIMARY KEY,
+        data      TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path)",
     "CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag)",
 ]
@@ -94,7 +102,17 @@ class IndexDatabase:
         self._conn.execute("PRAGMA foreign_keys=ON")
         for stmt in DDL:
             self._conn.execute(stmt)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """老库增列（CREATE TABLE IF NOT EXISTS 不会补列）。幂等，失败不阻断启动。"""
+        try:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(notes)")}
+            if "excerpt" not in cols:
+                self._conn.execute("ALTER TABLE notes ADD COLUMN excerpt TEXT")
+        except sqlite3.Error:
+            pass
 
     def close(self) -> None:
         with self._lock:
@@ -120,6 +138,7 @@ class IndexDatabase:
             c.execute("DELETE FROM tags")
             c.execute("DELETE FROM links")
             c.execute("DELETE FROM notes_fts")
+            c.execute("DELETE FROM props")
             c.execute("DELETE FROM meta")
             c.commit()
 
@@ -132,17 +151,19 @@ class IndexDatabase:
         size: int,
         created: Optional[str] = None,
         updated: Optional[str] = None,
+        excerpt: Optional[str] = None,
     ) -> None:
         with self._lock:
             self.conn.execute(
                 """
-                INSERT INTO notes (path, title, mtime, size, created, updated)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO notes (path, title, mtime, size, created, updated, excerpt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(path) DO UPDATE SET
                     title=excluded.title, mtime=excluded.mtime, size=excluded.size,
-                    created=excluded.created, updated=excluded.updated
+                    created=excluded.created, updated=excluded.updated,
+                    excerpt=excluded.excerpt
                 """,
-                (path, title, mtime, size, created, updated),
+                (path, title, mtime, size, created, updated, excerpt),
             )
             self.conn.commit()
 
@@ -153,26 +174,85 @@ class IndexDatabase:
             c.execute("DELETE FROM tags WHERE note_path = ?", (path,))
             c.execute("DELETE FROM links WHERE source_path = ?", (path,))
             c.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
+            c.execute("DELETE FROM props WHERE note_path = ?", (path,))
             c.commit()
 
     def get_note(self, path: str) -> Optional[Dict]:
         with self._lock:
             row = self.conn.execute(
-                "SELECT path, title, mtime, size, created, updated FROM notes WHERE path = ?",
+                "SELECT path, title, mtime, size, created, updated, excerpt"
+                " FROM notes WHERE path = ?",
                 (path,),
             ).fetchone()
         if row is None:
             return None
-        keys = ("path", "title", "mtime", "size", "created", "updated")
+        keys = ("path", "title", "mtime", "size", "created", "updated", "excerpt")
         return dict(zip(keys, row))
 
     def all_notes(self) -> List[Dict]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT path, title, mtime, size, created, updated FROM notes"
+                "SELECT path, title, mtime, size, created, updated, excerpt FROM notes"
             ).fetchall()
-        keys = ("path", "title", "mtime", "size", "created", "updated")
+        keys = ("path", "title", "mtime", "size", "created", "updated", "excerpt")
         return [dict(zip(keys, r)) for r in rows]
+
+    # ------------------------------------------------------------------ props
+    def upsert_props(self, path: str, data: Dict) -> None:
+        """写入 frontmatter 快照（JSON）。空 dict 也写，代表"有笔记但无属性"。"""
+        import json as _json
+
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO props (note_path, data) VALUES (?, ?)"
+                " ON CONFLICT(note_path) DO UPDATE SET data=excluded.data",
+                (path, _json.dumps(data or {}, ensure_ascii=False, default=str)),
+            )
+            self.conn.commit()
+
+    def get_props(self, path: str) -> Dict:
+        import json as _json
+
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT data FROM props WHERE note_path = ?", (path,)
+            ).fetchone()
+        if row is None:
+            return {}
+        try:
+            return _json.loads(row[0])
+        except (ValueError, TypeError):
+            return {}
+
+    def all_props(self) -> Dict[str, Dict]:
+        """全部 frontmatter 快照 → {path: dict}。结构化视图一次查询用。"""
+        import json as _json
+
+        with self._lock:
+            rows = self.conn.execute("SELECT note_path, data FROM props").fetchall()
+        out: Dict[str, Dict] = {}
+        for path, raw in rows:
+            try:
+                out[path] = _json.loads(raw)
+            except (ValueError, TypeError):
+                out[path] = {}
+        return out
+
+    def props_keys(self) -> List[str]:
+        """全部出现过的 frontmatter 键（去重）。"""
+        import json as _json
+
+        with self._lock:
+            rows = self.conn.execute("SELECT data FROM props").fetchall()
+        keys = set()
+        for (raw,) in rows:
+            try:
+                data = _json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(data, dict):
+                keys.update(str(k) for k in data)
+        return sorted(keys)
 
     def count_notes(self) -> int:
         with self._lock:

@@ -19,7 +19,7 @@
 
 **Kwey**
 
-**提供** 开箱即用的语义检索与 Agent 工具协议（MCP 23 工具），零插件、零账号、零上传
+**提供** 开箱即用的本地语义检索（离线 ONNX，零配置）与 Agent 工具协议（MCP 28 工具），零插件、零账号、零上传
 
 ### 压力测试
 
@@ -39,10 +39,10 @@
 | 数据所有权 | 本地 Markdown | 本地 Markdown | 云端 | 云端 | 本地 Markdown |
 | 内置 AI | 有（语义检索/RAG/整理） | **无**（插件 + 自备 key） | 有（$20/人/月） | 有 | 无（插件） |
 | Agent 接口 | **MCP + REST + CLI + 审计** | 无 | API | 无 | 无 |
-| 数据库视图 | 缺（待做） | Bases（2025，4.4/5） | 强（关系/rollup） | 无 | 弱 |
+| 数据库视图 | **有（Bases 式 + AI 建视图）** | Bases（2025，4.4/5） | 强（关系/rollup） | 无 | 弱 |
 | 插件生态 | 无（有意不做） | 10,683 个（2026-11-21） | 集成市场 | 无 | 数百 |
-| 迁移导入 | **缺（待做）** | 无（本身是目的地） | 有 | 有 | 有 |
-| 安装/分发 | 缺安装器 | 全平台安装包 | SaaS | SaaS | 安装包 |
+| 迁移导入 | **有（Obsidian/Logseq/MD）** | 无（本身是目的地） | 有 | 有 | 有 |
+| 安装/分发 | **Inno Setup 安装包 + zip** | 全平台安装包 | SaaS | SaaS | 安装包 |
 
 **关键事实（带来源）**
 - Obsidian 插件数 10,683（官方论坛，2026-11-21），社区出现"插件疲劳"，有人退回 restricted mode
@@ -61,20 +61,21 @@
 **我们输在哪**：生态（插件 0 vs 10,683）、移动端、协作、品牌信任。
 **未被满足的空白**：把"已有笔记库"低成本迁进来，并让 Agent 立刻能用——**没有任何一家把这条路径做顺**。
 
-## 4. 现状盘点（代码核实，2026-11-23）
+## 4. 现状盘点（代码核实，2026-11-23 收尾）
 
 | 能力 | 状态 |
 |---|---|
 | 编辑/双链/图谱/Canvas/Slides/模板/书签/回收站/PDF | ✅ 已实现 |
-| Agent Link（MCP 23 工具 + REST + diff 确认 + 快照 + 审计） | ✅ 已实现 |
+| Agent Link（MCP 28 工具 + REST + diff 确认 + 快照 + 审计） | ✅ 已实现 |
 | F1 知识编译 / F3 个人信息库 / F2 自动推送 | ✅ 已实现 |
-| F4 网页剪藏 / RAG 问答（带引用校验）/ 间隔复习 | ✅ 已实现（被低估，未在发布版验证） |
-| 语义检索（Chroma + bge） | ⚠️ 代码有，**未打包**，发布版等于纯 FTS |
-| 安装器 / 自动更新 | ❌ 缺 |
-| Obsidian / Notion 导入 | ❌ 缺 |
-| Bases 式结构化视图 | ❌ 缺 |
-| 知识体检（孤立/断链/重复/过期） | ❌ 缺（Pulse 只做统计） |
-| 快速捕获浮窗 / 移动端 | ❌ 缺 |
+| F4 网页剪藏 / RAG 问答（带引用校验）/ 间隔复习 | ✅ 已实现 |
+| 语义检索（**sqlite-vec + onnxruntime + bge-small-zh 本地模型**） | ✅ 已进包：模型随包分发，离线可用；embedder 可切 API |
+| 安装器 / 告知式自动更新 | ✅ Inno Setup 单文件安装包 + Gitee Release 检查 |
+| Obsidian / Logseq / Markdown 库导入 | ✅ 已实现（21 测试） |
+| Bases 式结构化视图（表格/卡片/列表 + 单元格写回 + AI 建视图） | ✅ 已实现（24 测试） |
+| 知识体检（孤立/断链/近重复/空/陈旧/无标签 + 0~100 分） | ✅ 已实现（18 测试） |
+| 快速捕获浮窗 / AI 收件箱 | ✅ 已实现（MCP 也可 `kwey.capture`） |
+| 移动端原生 | ❌ 不做（见 §7） |
 
 ## 5. 路线图（Now / Next / Later）
 
@@ -114,19 +115,38 @@
 | 风险 | 缓解 |
 |---|---|
 | sqlite-vec 仍 pre-v1，API 可能变 | 锁版本；VectorBackend 抽象已存在，可回退 Chroma/Null |
-| 打包 ONNX 模型使安装包 +100MB | 模型可选下载 + 首启向导；量化版 23MB 兜底 |
+| 打包 ONNX 模型使安装包变大 | 已量化到 24MB（+24MB），随包分发换零配置；缺失时可重下 |
 | 导入大库时内存/耗时 | 流式处理 + 分批写 + 进度事件（WS） |
-| Obsidian Bases 快速迭代，功能被追平 | 差异化押在"AI 生成视图 + 自然语言建表"，而非字段编辑器 |
+| Obsidian Bases 快速迭代，功能被追平 | 差异化押在"AI 生成视图 + 自然语言建表"，而非字段编辑器（已落地） |
 
 ## 9. 后续动作
 
-1. ✅ **已完成（2026-11-23）**：Obsidian / Markdown 库导入 —— `app/vault/importer.py` + `/api/import/scan|apply` + 设置页「导入已有笔记库」
+**本轮全部落地（2026-11-23）**，路线图 Now / Next / Later 八项清零：
+
+1. ✅ **Obsidian / Markdown 库导入** —— `app/vault/importer.py` + `/api/import/scan|apply` + 设置页「导入已有笔记库」
    - 扫描只读预览（篇数/体积/冲突/断链/重名），确认后落盘
    - 保留原目录结构（附件与双链零重写）、三种冲突策略、批量快照抑制
    - 21 个测试覆盖；真实目录 18 篇 + 10 附件扫描通过
-2. 下一轮：Bases 式结构化视图（frontmatter → 表格/卡片，可编辑写回）
-3. 再下一轮：语义检索进包（sqlite-vec + fastembed）+ 安装器/自动更新
-4. 最后：知识体检 + 快速捕获 + AI 收件箱
+2. ✅ **Bases 式结构化视图** —— `app/views/{query,schema,store}.py` + `static/js/bases.js`
+   - 表格 / 卡片 / 列表三模式；表头排序、分组小计、页脚聚合
+   - 单元格就地编辑写回 frontmatter（走 `VaultService.write_note`，正文一字不动）
+   - 定义存 `views/*.base`（YAML，随 git 同步），兼容 Obsidian Bases 子集
+   - **AI 建视图**：一句话 → 只用真实字段 → 先预览再落盘
+   - 条件白名单（`= != > >= < <= contains in exists empty before after`），不接受可执行代码
+3. ✅ **语义检索进包** —— `app/index/{sqlite_vec,onnx_embedder,models}.py`
+   - `sqlite-vec` `vec0` 虚拟表（cosine）+ 纯 Python WordPiece 分词 + `onnxruntime` 跑 bge-small-zh-v1.5
+   - 模型 24MB 随包分发；缺失时设置页一键下载（hf-mirror → huggingface.co 双源）
+   - 后端链 `sqlite-vec → chroma → null`，embedder 链 `local → API → sentence-transformers → hashing`
+   - 实测：load 0.35s / 3 条向量 0.21s；`sim(向量检索, sqlite-vec 存)=0.62` vs `sim(向量检索, 吃什么)=0.21`
+4. ✅ **安装器 + 告知式更新** —— `installer/kwey.iss` + `app/update.py` + `static/js/update.js`
+   - `PrivilegesRequired=lowest`，装到 `%LOCALAPPDATA%\Programs\Kwey`，卸载保留用户数据
+   - 启动后静默查 Gitee Release（回落 tags → GitHub），6 小时缓存，只提示不替换
+5. ✅ **知识体检 + 快速捕获 + AI 收件箱** —— `app/diagnose.py` + `routes_health.py` + `routes_inbox.py`
+   - 六类问题加权扣分 → 0~100 分；三种一键修复（空笔记进回收站 / 断链降级 / 批量补标签）
+   - 捕获只问内容，整理延后：AI 给标题/目录/标签建议，人勾选后批量应用
+6. ✅ **MCP 工具矩阵 23 → 28**：新增 `kwey.views.list` / `kwey.views.query` / `kwey.views.save` / `kwey.diagnose` / `kwey.capture`
+
+**下一轮候选**（未排期）：PWA 只读 + 移动端捕获；流式导入进度（WS）；视图关系列（rollup/relation，对齐 Notion）。
 
 ---
 

@@ -412,3 +412,58 @@ class AgentProvider:
                 args = {}
             tool_calls.append({"id": tc.get("id") or "", "name": name, "arguments": args})
         return {"content": content, "tool_calls": tool_calls}
+
+
+# --------------------------------------------------------------------- 共用辅助
+def thinking_off_body(provider: "AgentProvider") -> Dict[str, Any]:
+    """DashScope（qwen3 系）默认开思考，一次结构化生成会先产数万字推理。
+
+    只在阿里云官方兼容端点关闭思考；其它网关不附加未知字段，免得被 400 拒绝。
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(str(provider.config.get("endpoint") or "")).hostname or "").lower()
+    return {"enable_thinking": False} if host.endswith("aliyuncs.com") else {}
+
+
+def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """从模型输出里抠出第一个 JSON 对象（容忍 ``` 围栏与前后废话）。"""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0]
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            data = json.loads(text[start: end + 1])
+        except (ValueError, TypeError):
+            return None
+    return data if isinstance(data, dict) else None
+
+
+def chat_json(
+    provider: "AgentProvider",
+    messages: List[Dict[str, Any]],
+    *,
+    timeout: float = 90.0,
+) -> Dict[str, Any]:
+    """chat + 关闭思考 + 400/422 自动去扩展字段重试 + 解析 JSON 对象。
+
+    失败抛 ProviderError（消息可直接展示给用户）。
+    """
+    extra = thinking_off_body(provider)
+    try:
+        result = provider.chat(messages, extra_body=extra, timeout=timeout)
+    except ProviderError as exc:
+        if extra and ("HTTP 400" in str(exc) or "HTTP 422" in str(exc)):
+            result = provider.chat(messages, timeout=timeout)
+        else:
+            raise
+    data = extract_json_object(str(result.get("content") or ""))
+    if data is None:
+        raise ProviderError("模型返回的不是合法 JSON，请换个说法再试")
+    return data

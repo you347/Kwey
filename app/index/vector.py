@@ -1,11 +1,17 @@
-"""向量索引（P1-23）：VectorIndex 抽象 + ChromaBackend + NullBackend + 可插拔 Embedder。
+"""向量索引：VectorIndex 抽象 + 多后端 + 可插拔 Embedder。
 
-降级链：settings.vector.enabled=False / 缺 chromadb / 初始化失败 → NullBackend，
-hybrid 检索自动等价纯 FTS，不抛错。embedding 默认 bge-small-zh-v1.5
-（sentence-transformers 可选），模型库缺失时降级 HashingEmbedder（确定性哈希
-词向量，不联网、不下载模型）。
+后端优先级（``vector.backend``，默认 auto）：
+1. **sqlite-vec**：单文件扩展，和 FTS 同为 SQLite，发布版默认，零外部依赖；
+2. Chroma：老配置兼容（装了 chromadb 才用）；
+3. Null：不可用时空操作，hybrid 等价纯 FTS，绝不抛错。
 
-存储位于 <vault>/.kwey/vector/，Indexer.full_scan 时 reset 重建（索引可重建语义）。
+Embedder 优先级（``vector.embedder``，默认 auto）：
+1. **本地 ONNX 模型**（bge-small-zh-v1.5，24MB，首次启用时下载）——离线、快、中文效果好；
+2. **API embedding**（复用已配置的 OpenAI 兼容 Provider，``vector.api_model`` 指定模型名）；
+3. **Hashing**（确定性哈希词向量，零依赖兜底；质量弱，仅保证不崩）。
+
+存储：``<vault>/.kwey/vector.db``（sqlite-vec）/ ``.kwey/vector/``（Chroma）
+，Indexer.full_scan 时 reset 重建——向量永远是可重建索引，不是事实源。
 """
 
 from __future__ import annotations
@@ -85,6 +91,86 @@ class SentenceTransformerEmbedder:
         return [[float(x) for x in v] for v in vectors]
 
 
+class ApiEmbedder:
+    """OpenAI 兼容 /embeddings（复用 provider.json 的 endpoint/api_key）。
+
+    适用：用户已有云端 embedding 配额、或想要比 24MB 本地模型更强的模型。
+    dim 未知时先探测一次（OpenAI 协议响应里有向量长度）。
+    """
+
+    name = "api"
+
+    def __init__(self, endpoint: str, model: str, api_key: str = "", timeout: float = 60.0) -> None:
+        self.endpoint = endpoint.rstrip("/")
+        self.url = self.endpoint if self.endpoint.endswith("/embeddings") else self.endpoint + "/embeddings"
+        self.model = model
+        self.api_key = api_key
+        self.timeout = timeout
+        self.dim = 0
+
+    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+        import json
+        import urllib.request
+
+        payload = json.dumps({
+            "model": self.model,
+            "input": [str(t or "")[:2000] for t in texts],
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        items = data.get("data") or []
+        items.sort(key=lambda item: item.get("index", 0))
+        vectors = [[float(x) for x in item.get("embedding") or []] for item in items]
+        if len(vectors) != len(texts) or any(not v for v in vectors):
+            raise RuntimeError("embedding 接口返回的向量数量/维度不合法")
+        if not self.dim:
+            self.dim = len(vectors[0])
+        # 归一化：后端用余弦，统一成单位向量避免 API 是否归一化的差异
+        out: List[List[float]] = []
+        for vec in vectors:
+            norm = math.sqrt(sum(v * v for v in vec))
+            out.append([v / norm for v in vec] if norm > 0 else vec)
+        return out
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed([text])[0]
+
+
+def _provider_config(root: Path) -> Dict:
+    """读 .kwey/provider.json（与 AgentProvider 同源，但不 import 它避免循环依赖）。"""
+    import json
+
+    path = Path(root) / ".kwey" / "provider.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def build_api_embedder(root: Path, config: Dict) -> Optional[Embedder]:
+    """按 vector.api_model + provider.json 构建；缺配置返回 None。"""
+    model = str((config or {}).get("api_model") or "").strip()
+    if not model:
+        return None
+    provider = _provider_config(root)
+    endpoint = str(provider.get("endpoint") or "").strip()
+    if not endpoint:
+        return None
+    key = str(provider.get("api_key") or "")
+    try:
+        return ApiEmbedder(endpoint, model, key, timeout=float(provider.get("timeout") or 60))
+    except Exception:  # noqa: BLE001
+        logger.exception("API embedding 初始化失败")
+        return None
+
+
 def _chroma_installed() -> bool:
     return importlib.util.find_spec("chromadb") is not None
 
@@ -93,17 +179,52 @@ def _sentence_transformers_installed() -> bool:
     return importlib.util.find_spec("sentence_transformers") is not None
 
 
-def build_embedder(model: str = DEFAULT_MODEL) -> Embedder:
-    """配置口：model=hashing 显式用哈希词向量；其余走 sentence-transformers，缺库降级。"""
+def build_embedder(
+    model: str = DEFAULT_MODEL,
+    root: Optional[Path] = None,
+    config: Optional[Dict] = None,
+) -> Optional[Embedder]:
+    """按 ``vector.embedder`` 构建：local(ONNX) → api → sentence-transformers → hashing。
+
+    ``root`` 用于读 provider.json 走 API embedding；不给则不尝试 API。
+    """
+    cfg = config or {}
     name = (model or DEFAULT_MODEL).strip()
-    if name.lower() in {"hashing", "hash", "bow"}:
+    kind = str(cfg.get("embedder") or "auto").strip().lower()
+
+    if kind in {"hashing", "hash", "bow"} or name.lower() in {"hashing", "hash", "bow"}:
         return HashingEmbedder()
-    if not _sentence_transformers_installed():
-        logger.warning(
-            "未安装 sentence-transformers，embedding 降级为哈希词向量（配置 model=%s）", name
-        )
+
+    if kind in {"auto", "local", "onnx"}:
+        try:
+            from app.index.onnx_embedder import build_onnx_embedder
+
+            local = build_onnx_embedder(name)
+        except Exception:  # noqa: BLE001
+            logger.exception("本地 ONNX embedding 初始化异常")
+            local = None
+        if local is not None:
+            return local
+        if kind in {"local", "onnx"}:
+            logger.warning("本地模型未就绪（model=%s），按配置不降级到其它 embedder", name)
+
+    if kind in {"auto", "api"} and root is not None:
+        api = build_api_embedder(Path(root), cfg)
+        if api is not None:
+            return api
+        if kind == "api":
+            logger.warning("vector.api_model 或 provider.json 未配置，API embedding 不可用")
+
+    if kind == "auto" and _sentence_transformers_installed():
+        try:
+            return SentenceTransformerEmbedder(name)
+        except Exception:  # noqa: BLE001
+            logger.exception("sentence-transformers 初始化失败")
+
+    if kind == "auto":
+        logger.warning("没有可用的语义模型（model=%s），embedding 降级为哈希词向量", name)
         return HashingEmbedder()
-    return SentenceTransformerEmbedder(name)
+    return None
 
 
 class VectorIndex(ABC):
@@ -281,25 +402,59 @@ class ChromaBackend(VectorIndex):
                 pass
 
 
+def _sqlite_vec_available() -> bool:
+    try:
+        from app.index import sqlite_vec
+
+        return sqlite_vec.available()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def build_vector_index(
     root: Path,
     config: Optional[Dict] = None,
     embedder: Optional[Embedder] = None,
 ) -> VectorIndex:
-    """按 settings.vector 构建后端；未启用/缺 chromadb/初始化失败一律 NullBackend。"""
+    """按 settings.vector 构建；任何环节失败都回 NullBackend（hybrid 自动等价 FTS）。"""
     cfg = config or {}
     if not cfg.get("enabled", False):
         return NullBackend()
-    if not _chroma_installed():
-        logger.warning("未安装 chromadb，向量检索不可用（hybrid 降级为纯 FTS）")
+
+    backend = str(cfg.get("backend") or "auto").strip().lower()
+    if backend in {"null", "off", "none"}:
         return NullBackend()
-    try:
-        emb = (
-            embedder
-            if embedder is not None
-            else build_embedder(str(cfg.get("model") or DEFAULT_MODEL))
-        )
-        return ChromaBackend(root, emb)
-    except Exception:  # noqa: BLE001 —— 向量是增强能力，初始化失败不阻断 vault
-        logger.exception("向量索引初始化失败，降级为纯 FTS")
+
+    emb = (
+        embedder
+        if embedder is not None
+        else build_embedder(str(cfg.get("model") or DEFAULT_MODEL), Path(root), cfg)
+    )
+    if emb is None:
+        logger.warning("没有可用 embedder，向量检索关闭（hybrid 降级为纯 FTS）")
         return NullBackend()
+
+    want_sqlite = backend in {"auto", "sqlite-vec", "sqlite_vec", "sqlitevec"}
+    if want_sqlite and _sqlite_vec_available():
+        try:
+            from app.index.sqlite_vec import SqliteVecBackend
+
+            return SqliteVecBackend(
+                Path(root), emb, model_key=getattr(emb, "model", "") or getattr(emb, "name", "")
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("sqlite-vec 初始化失败")
+            if backend != "auto":
+                return NullBackend()
+
+    want_chroma = backend in {"auto", "chroma"}
+    if want_chroma and _chroma_installed():
+        try:
+            return ChromaBackend(Path(root), emb)
+        except Exception:  # noqa: BLE001
+            logger.exception("Chroma 初始化失败")
+            if backend != "auto":
+                return NullBackend()
+
+    logger.warning("向量后端不可用（backend=%s），hybrid 降级为纯 FTS", backend)
+    return NullBackend()

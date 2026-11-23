@@ -44,6 +44,11 @@ import { initRag } from './rag.js';
 import { initReview } from './review.js';
 import { initClipper } from './clipper.js';
 import { initImporter } from './importer.js';
+import { initBases } from './bases.js';
+import { initUpdate } from './update.js';
+import { initDiagnose } from './diagnose.js';
+import { initCapture, openCapture } from './capture.js';
+import { initInbox } from './inbox.js';
 
 let autosaveRunner = null;
 let wsClosed = null;
@@ -175,6 +180,11 @@ async function startVaultUI() {
   initReview();
   initClipper();
   initImporter();
+  initBases();
+  initUpdate();
+  initDiagnose();
+  initCapture();
+  initInbox();
   initPulse();
   hotkeys.refresh();
   shell.onVaultReady();
@@ -524,6 +534,7 @@ function bindGlobalKeys() {
     switcher: () => switcher.openSwitcher(),
     palette: () => palette.openPalette(),
     'new-note': () => newNotePrompt(''),
+    capture: () => openCapture(),
     save: () => saveNote(true),
     'close-tab': () => { if (state.activePath) tabs.closeTab(state.activePath); },
     daily: () => templates.openDailyNote(),

@@ -91,14 +91,18 @@ class TestDegradation:
             assert hybrid["total"] == fts["total"], q
             assert hybrid["vector"] == {"available": False, "backend": "null"}
 
-    def test_missing_chromadb_factory_null(self, tmp_path, monkeypatch):
+    def test_no_backend_factory_null(self, tmp_path, monkeypatch):
+        """sqlite-vec 与 chroma 都不可用 → NullBackend（hybrid 等价 FTS）。"""
+        from app.index import sqlite_vec
+
+        monkeypatch.setattr(sqlite_vec, "available", lambda: False)
         monkeypatch.setattr(vec_mod, "_chroma_installed", lambda: False)
-        backend = build_vector_index(tmp_path, {"enabled": True})
+        backend = build_vector_index(tmp_path, {"enabled": True, "embedder": "hashing"})
         assert isinstance(backend, NullBackend)
         assert not backend.available
 
-    def test_missing_chromadb_api_equals_fts(self, client, monkeypatch):
-        monkeypatch.setattr(vec_mod, "_chroma_installed", lambda: False)
+    def test_no_backend_api_equals_fts(self, client, monkeypatch):
+        monkeypatch.setattr(vec_mod, "build_embedder", lambda *a, **kw: None)
         root = deps.require_vault().paths.root
         deps.require_indexer().vector = build_vector_index(root, {"enabled": True})
         fts = _search(client, "会议", "fts")
@@ -107,12 +111,15 @@ class TestDegradation:
         assert hybrid["vector"]["available"] is False
 
     def test_init_failure_degrades_null(self, tmp_path, monkeypatch):
+        from app.index import sqlite_vec
+
         class Boom:
             def __init__(self, *a, **kw):
                 raise RuntimeError("chroma 初始化失败")
 
+        monkeypatch.setattr(sqlite_vec, "available", lambda: False)
         monkeypatch.setattr(vec_mod, "ChromaBackend", Boom)
-        backend = build_vector_index(tmp_path, {"enabled": True})
+        backend = build_vector_index(tmp_path, {"enabled": True, "embedder": "hashing"})
         assert isinstance(backend, NullBackend)
 
 
@@ -264,11 +271,17 @@ class TestEmbedder:
         assert isinstance(build_embedder("hashing"), HashingEmbedder)
 
     def test_build_embedder_fallback_no_download(self, monkeypatch):
+        from app.index import models as model_store
+
+        monkeypatch.setattr(model_store, "is_ready", lambda *a, **kw: False)
         monkeypatch.setattr(vec_mod, "_sentence_transformers_installed", lambda: False)
         emb = build_embedder("bge-small-zh-v1.5")
-        assert isinstance(emb, HashingEmbedder)  # 缺模型库 → 词向量降级
+        assert isinstance(emb, HashingEmbedder)  # 无本地模型 / 无 API → 词向量降级
 
     def test_build_embedder_st_lazy(self, monkeypatch):
+        from app.index import models as model_store
+
+        monkeypatch.setattr(model_store, "is_ready", lambda *a, **kw: False)
         monkeypatch.setattr(vec_mod, "_sentence_transformers_installed", lambda: True)
         emb = build_embedder("bge-small-zh-v1.5")
         assert isinstance(emb, SentenceTransformerEmbedder)

@@ -30,7 +30,10 @@ class AppSettings:
         # A2：向量检索可配置。enabled 默认关闭（零依赖开箱即用）；缺 chromadb 时自动降级纯 FTS
         "vector": {
             "enabled": False,
-            "model": "bge-small-zh-v1.5",
+            "backend": "auto",        # auto | sqlite-vec | chroma | null
+            "embedder": "auto",       # auto | local(ONNX) | api | hashing
+            "model": "bge-small-zh-v1.5",   # 本地模型（models/ 下）
+            "api_model": "",          # OpenAI 兼容 embedding 模型名（复用 provider.json）
             "weight": 1.0,       # RRF 中向量通道权重
             "graph_weight": 0.5, # 链接图扩展权重
             "rrf_k": 60,         # RRF 平滑常数
@@ -49,6 +52,14 @@ class AppSettings:
         "periodic_dir": "templates",     # 周期笔记模板目录（C2；与 daily 共用）
         "clip_dir": "clips",             # 网页剪藏落盘目录（C6）
         "custom_css_enabled": False,     # 自定义 CSS 实时预览开关（C4；CSS 内容存独立文件）
+        # ---- Bases 式结构化视图 ----
+        "views": {"dir": "views"},      # 视图定义（*.base YAML）所在目录，随 vault 同步
+        # ---- 自动更新检查（只告知，不静默替换）----
+        "update": {"check_on_start": True, "platform": "gitee", "repo": "ye-jun-hao55/kwey"},
+        # ---- 知识体检 ----
+        "diagnose": {"stale_days": 90, "duplicate_ratio": 0.92, "exclude": []},
+        # ---- 快速捕获 / AI 收件箱 ----
+        "inbox": {"dir": "inbox"},
     }
 
     def __init__(self, vault_root: Optional[Path] = None) -> None:

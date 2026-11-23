@@ -382,6 +382,122 @@ def _organize_apply(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
     return apply_ops(ops, vault)
 
 
+# ---------------------------------------------------------------- 工具实现（W4 新增 5 个）
+def _views_dir(vault: VaultService) -> str:
+    raw = vault.config.get("views") if getattr(vault, "config", None) else None
+    data = raw if isinstance(raw, dict) else {}
+    return str(data.get("dir") or "views").strip("/") or "views"
+
+
+def _views_store(vault: VaultService):
+    from app.views import ViewStore
+
+    return ViewStore(vault.paths.root, _views_dir(vault))
+
+
+def _views_list(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """列出视图定义（含完整 definition，智能体可直接据此判断该查哪个）。"""
+    items = []
+    for item in _views_store(vault).list():
+        defn = item["definition"]
+        items.append({
+            "slug": item["slug"],
+            "name": defn.get("name"),
+            "mode": defn.get("mode"),
+            "folder": defn.get("folder"),
+            "tags": defn.get("tags") or [],
+            "definition": defn,
+        })
+    return {"items": items, "total": len(items), "dir": _views_dir(vault)}
+
+
+def _views_query(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """执行视图：slug 读已存定义，definition 走临时定义（都不写盘）。"""
+    from app.views import normalize_definition, run_query
+    from app.views.query import cached_snapshot
+
+    definition = None
+    slug = a.get("slug")
+    if isinstance(slug, str) and slug.strip():
+        definition = _views_store(vault).read(slug.strip())
+        if definition is None:
+            raise ContractError(404, f"视图不存在: {slug}")
+    inline = _as_dict(a.get("definition"), "definition")
+    if inline:
+        definition = normalize_definition(inline)
+    if definition is None:
+        raise ContractError(400, "缺少 slug 或 definition，至少给一个")
+
+    result = run_query(
+        cached_snapshot(vault.db),
+        definition,
+        offset=_opt_int(a, "offset", 0, 0, 100000),
+        limit_override=a.get("limit"),
+    )
+    result["definition"] = definition
+    return result
+
+
+def _views_save(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """落盘视图定义到 ``views/*.base``；slug 缺省按名字生成。"""
+    defn = _as_dict(a.get("definition"), "definition") or {}
+    if not str(defn.get("name") or "").strip():
+        raise ContractError(400, "视图需要名字（definition.name）")
+    slug = a.get("slug")
+    slug = slug.strip() if isinstance(slug, str) and slug.strip() else None
+    if slug and not _views_store(vault).exists(slug):
+        raise ContractError(404, f"视图不存在: {slug}")
+    try:
+        return _views_store(vault).save(defn, slug=slug)
+    except ValueError as exc:
+        raise ContractError(400, str(exc)) from None
+
+
+def _diagnose(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """知识体检：六类问题 + 0~100 分；只读，不修。"""
+    from app.diagnose import scan
+
+    raw = vault.config.get("diagnose") if getattr(vault, "config", None) else None
+    cfg: Dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
+    for key in ("stale_days", "max_items", "duplicate_ratio"):
+        if a.get(key) is not None:
+            cfg[key] = a[key]
+    return scan(vault.paths.root, vault.db, cfg, deep=bool(a.get("deep", True)))
+
+
+def _capture(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """快速捕获：一句话进收件箱，不要求标题/目录（整理延后到 kwey.inbox.*）。"""
+    from app.api.routes_inbox import _clean_title, _first_line_title
+
+    text = _req_str(a, "text")
+    if len(text) > 50000:
+        raise ContractError(400, "内容过长（上限 50000 字）")
+    raw = vault.config.get("inbox") if getattr(vault, "config", None) else None
+    folder = str((raw if isinstance(raw, dict) else {}).get("dir") or "inbox").strip("/") or "inbox"
+    title = _clean_title(a["title"]) if str(a.get("title") or "").strip() else _first_line_title(text)
+
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H%M")
+    rel = f"{folder}/{stamp} {title}.md"
+    tags = [str(t).strip().lstrip("#") for t in _as_str_list(a.get("tags")) if str(t).strip()][:10]
+    frontmatter: Dict[str, Any] = {
+        "captured": True,
+        "source": "agent",
+        "captured_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    if tags:
+        frontmatter["tags"] = tags
+
+    meta = vault.create_note(
+        rel,
+        content=text if text.endswith("\n") else text + "\n",
+        frontmatter=frontmatter,
+        dedup=True,
+    )
+    return {"path": meta["path"], "title": meta.get("title") or title}
+
+
 # ---------------------------------------------------------------- 工具注册（契约 v1）
 _TOOLS: Dict[str, Dict[str, Any]] = {}
 
@@ -702,6 +818,66 @@ _register(
     },
     "write", "reversible", "organize", _organize_apply,
 )
+_register(
+    "kwey.views.list",
+    "列出结构化视图（Bases）：slug / 名字 / 模式 / 筛选条件 / 完整定义。想知道库里有哪些现成视图时先调它。",
+    {"type": "object", "properties": {}},
+    "read", "read", None, _views_list,
+)
+_register(
+    "kwey.views.query",
+    "按视图定义查笔记（表格行）：传 slug 复用已存视图，或传 definition 临时查。返回 rows/total/columns/aggregates，每行含 path 与各属性值。适合「按状态分组列项目」「按截止日期排任务」这类结构化问题，比全库 search 更准。",
+    {
+        "type": "object",
+        "properties": {
+            "slug": {"type": "string", "description": "已存视图标识（kwey.views.list 里拿）"},
+            "definition": {"type": "object", "description": "临时视图定义（folder/tags/where/columns/sort/group_by/limit）"},
+            "offset": {"type": "integer", "description": "分页偏移（默认 0）", "minimum": 0, "maximum": 100000},
+            "limit": {"type": "integer", "description": "本次返回条数（覆盖定义里的 limit）", "minimum": 1, "maximum": 2000},
+        },
+    },
+    "read", "read", None, _views_query,
+)
+_register(
+    "kwey.views.save",
+    "创建或更新结构化视图定义（写入 views/<slug>.base，随 vault 同步）。只写视图，不改笔记。",
+    {
+        "type": "object",
+        "properties": {
+            "definition": {"type": "object", "description": "视图定义，至少含 name；可选 folder/tags/where/columns/sort/group_by/limit/mode"},
+            "slug": {"type": "string", "description": "更新已有视图时传 slug；缺省按名字新建"},
+        },
+        "required": ["definition"],
+    },
+    "write", "reversible", "create", _views_save,
+)
+_register(
+    "kwey.diagnose",
+    "知识体检：孤立笔记 / 断链 / 近重复 / 空笔记 / 陈旧 / 无标签六类问题 + 0~100 健康分。只读；修复由用户在界面确认。",
+    {
+        "type": "object",
+        "properties": {
+            "deep": {"type": "boolean", "description": "是否读正文做近重复检测（默认 true，大库可关掉更快）"},
+            "stale_days": {"type": "integer", "description": "多少天没改算陈旧（默认取设置值 90）", "minimum": 1, "maximum": 3650},
+            "max_items": {"type": "integer", "description": "每类最多返回多少条样例（1-200）", "minimum": 1, "maximum": 200},
+        },
+    },
+    "read", "read", None, _diagnose,
+)
+_register(
+    "kwey.capture",
+    "快速捕获：把一段想法/待办/摘录原样存进收件箱（inbox/），自动补时间戳与来源标记，不需要标题和目录。整理留到之后再走收件箱流程。",
+    {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "内容（上限 50000 字）"},
+            "title": {"type": "string", "description": "标题（可选，缺省取首行）"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "顺手的标签（可选，最多 10 个）"},
+        },
+        "required": ["text"],
+    },
+    "write", "reversible", "create", _capture,
+)
 
 
 # ---------------------------------------------------------------- 公共 API
@@ -728,6 +904,9 @@ def _journal_paths(name: str, args: Dict[str, Any], data: Any) -> List[str]:
     """一次调用对应的 journal 路径列表；organize.apply 按实际应用路径逐条记录。"""
     if name == "kwey.organize.apply" and isinstance(data, dict):
         return [str(p) for p in (data.get("paths") or [])] or [""]
+    if name in ("kwey.capture", "kwey.views.save") and isinstance(data, dict):
+        # 这两个工具的落盘路径由 handler 生成（args 里没有 path）
+        return [str(data.get("path") or "")]
     path = args.get("path") or args.get("from") or args.get("trash_path") or ""
     return [str(path)]
 

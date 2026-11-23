@@ -300,6 +300,9 @@ def _run_diag() -> int:
         "clr": probe("clr", lambda: _import_platform("clr")),
         "reportlab": {"ok": importlib.util.find_spec("reportlab") is not None},
         "chromadb": {"ok": importlib.util.find_spec("chromadb") is not None},
+        "sqlite_vec": probe("sqlite_vec", lambda: __import__("app.index.sqlite_vec", fromlist=["x"]).available()),
+        "onnxruntime": {"ok": importlib.util.find_spec("onnxruntime") is not None},
+        "embed_model": probe("embed_model", lambda: __import__("app.index.models", fromlist=["x"]).status()),
         "git": probe("git", _git),
         "port_busy": {str(p): _port_busy(p) for p in (DEFAULT_PORT,)},
     }

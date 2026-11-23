@@ -82,6 +82,19 @@
 
 - 全部浮层/面板自绘 DOM（C1/C3/C4/C6），仅 RAG 浮层在 index.html 静态声明。
 
+### Wave B（本轮：结构化视图 · 语义检索进包 · 安装器 · 知识体检）
+
+| 卡 | 能力 | 入口 |
+|---|---|---|
+| B1 | **Bases 式结构化视图**：frontmatter 属性 → 表格/卡片/列表三视图，表头排序、单元格就地编辑（写回 frontmatter，正文一字不动）、分组小计与页脚聚合；定义存 `views/*.base`（YAML，随 git 同步），兼容 Obsidian Bases 子集 | ribbon「视图」/ 命令「打开视图」；`/api/views`、`/api/views/query`、`PUT /api/views/cell`；MCP `kwey.views.list/query/save` |
+| B1b | **AI 建视图**：一句话描述 → 只读真实字段清单 → 生成定义 → 先预览再落盘（绝不自动保存） | 视图浮层「AI 建视图」；`POST /api/views/ai` |
+| B2 | **语义检索进包**：`sqlite-vec`（`vec0` 虚拟表，cosine）+ 纯 Python BERT 分词 + `onnxruntime` 跑 bge-small-zh-v1.5（24MB，已随包分发）→ 离线语义召回；embedder 链 `local → API → sentence-transformers → hashing`，后端链 `sqlite-vec → chroma → null` | 设置页「语义检索」：开关/后端/Embedder/权重/下载模型/重建/试查；`/api/vector/status|model/download|reindex|search` |
+| B3 | **安装器 + 告知式更新**：Inno Setup 脚本生成单文件安装包（`PrivilegesRequired=lowest`，装到 `%LOCALAPPDATA%\Programs\Kwey`，卸载保留用户数据）；启动 6 小时后检查一次 Gitee Release（回落 tags → GitHub），只提示不静默替换 | `python build.py --installer`；设置页「关于 → 检查更新」；`GET /api/update/check` |
+| B4 | **知识体检**：孤立 / 断链 / 近重复（3-gram Jaccard）/ 空笔记 / 陈旧 / 无标签六类，加权扣分给 0~100 健康分；一键修复走 VaultService（空笔记进回收站、断链降级纯文本、批量补标签） | ribbon「知识体检」/ 命令；`GET /api/diagnose`、`POST /api/diagnose/fix`；MCP `kwey.diagnose` |
+| B5 | **快速捕获 + AI 收件箱**：`Ctrl+Shift+Space` 一句话进 `inbox/`（自动时间戳、`captured: true`）；整理延后——AI 为每条建议标题/目录/标签，人勾选后批量应用（移动 + 改名自动重写链接） | ribbon「捕获」「收件箱」；`POST /api/capture`、`GET /api/inbox`、`POST /api/inbox/suggest|apply`；MCP `kwey.capture` |
+
+- 设计取舍：视图定义、收件箱笔记都是**用户资产**（放 vault 内、普通 Markdown/YAML），`.kwey/` 只放索引与凭据；体检与 AI 建视图**只读不写**，落盘一律由人确认。
+
 ### 界面外壳（Obsidian 式）
 
 左侧 **ribbon** + 左右多 tab 面板（文件/搜索/标签/书签/最近/大纲/回收站 · 反链/本地图谱）、可拖拽分隔条与宽度记忆、状态栏（字数/光标行列/路径/保存/索引）、全量 SVG 图标、0.5px 微边框、单一强调色、4 档字号、`prefers-reduced-motion` 降级。
@@ -96,6 +109,7 @@
 | `Ctrl+Shift+D` | 每日笔记 | `Ctrl+Shift+T` | 插入模板 |
 | `Ctrl+Shift+G` | 全局图谱 | `Ctrl+Shift+E` | 导出 MD |
 | `Ctrl+Shift+B` | 收藏 | `Ctrl+Shift+O` | 大纲面板 |
+| `Ctrl+Shift+Space` | 快速捕获 | `Ctrl+Shift+S` | 分屏（同一篇并排） |
 
 全部可在「设置 → 快捷键」重新录制。M2 的三个入口（Agent Link 设置、整理 diff、快照时间线）走命令面板。
 
@@ -120,14 +134,18 @@ curl -H "X-Kwey-Token: <token>" "http://127.0.0.1:17630/api/agent/health"
 
 ```bash
 python -m pip install -r requirements.txt pyinstaller
-python build.py                 # 产物：dist/Kwey/Kwey.exe（约 53 MB，onedir）
-python build.py --console       # 带控制台的调试版，便于看 traceback
+python build.py                    # 产物：release/Kwey/（onedir）+ release/Kwey-<ver>-win64.zip
+python build.py --installer        # 额外生成安装包（需 Inno Setup 6，自动找 ISCC.exe）
+python build.py --console          # 带控制台的调试版，便于看 traceback
+python build.py --skip-build       # 只重打 zip / 安装器，不重新跑 PyInstaller
 ```
 
-- 分发时**整个 `dist/Kwey/` 目录一起打包**（`Kwey.exe` 与 `_internal/` 必须同级）；压缩包形式可直接给用户解压运行。
+- 分发时**整个 `release/Kwey/` 目录一起给**（`Kwey.exe` 与 `_internal/` 必须同级）；或直接发 zip / 安装包。
 - 目标机要求：Windows 10 1809+ / Windows 11；**WebView2 Runtime**（Win11 自带，Win10 需装 Evergreen Runtime）；`.NET Framework 4.7.2+`（系统自带）。缺 WebView2 时自动降级为浏览器模式。
-- 可选依赖：`git` 仅 F2 自动推送与快照回滚需要，缺失时相关功能自动降级；`chromadb` / `sentence-transformers` 未打包，混合检索自动降级为 FTS。
-- 用户数据位置：vault 内 `.kwey/`（索引、设置、token 哈希、自定义 CSS）；日志 `%LOCALAPPDATA%\Kwey\logs\kwey.log`；自检报告 `%LOCALAPPDATA%\Kwey\diag.json`。
+- **语义检索开箱可用**：`sqlite-vec` 与 `onnxruntime` 随包分发，`bge-small-zh-v1.5`（24MB）打进 `_internal/models/`，无需联网下载。若换机器/删了模型，设置页可一键重新下载（hf-mirror → huggingface.co 双源）。
+- 可选依赖：`git` 仅 F2 自动推送与快照回滚需要，缺失时相关功能自动降级；`chromadb` / `sentence-transformers` 已非必需（仅作为后端/embedder 的备选）。
+- 用户数据位置：vault 内 `.kwey/`（索引、设置、token 哈希、自定义 CSS、`vector.db`）；日志 `%LOCALAPPDATA%\Kwey\logs\kwey.log`；自检报告 `%LOCALAPPDATA%\Kwey\diag.json`。安装器卸载**不删** `%LOCALAPPDATA%\Kwey`。
+- 更新检查：启动 4 秒后静默查一次（6 小时缓存），只在设置页「关于 → 检查更新」展示结果，**不静默替换**二进制。
 - 打包后同样支持全部命令行能力：
 
 ```bash
@@ -143,26 +161,30 @@ Kwey.exe --diag                            # 环境自检，排障时先跑这�
 ```
 Kwey/
 ├── main.py                 # 唯一入口：--server / pywebview / --mcp / --diag 四模式
-├── build.py                # 一键打包（PyInstaller）+ 产物自检
-├── kwey.spec               # 打包配置：onedir、static 资源、uvicorn/webview hiddenimports
+├── build.py                # 一键打包（PyInstaller）+ zip + 可选安装器 + 产物自检
+├── kwey.spec               # 打包配置：onedir、static/models、sqlite-vec/onnxruntime 二进制、图标
 ├── kwey_mcp.py             # MCP stdio 入口（薄封装，实现见 app/agent/mcp_stdio.py）
+├── installer/kwey.iss      # Inno Setup 6 脚本（单文件安装包，卸载保留用户数据）
+├── tools/make_icon.py      # 生成 static/icons/kwey.ico（7 尺寸）
+├── models/bge-small-zh-v1.5/  # 本地 embedding 模型（ONNX，24MB，随包分发）
 ├── app/
-│   ├── config.py           # .kwey/settings.json 读写（P1 + M2 设置字段）
+│   ├── config.py           # .kwey/settings.json 读写（P1 + M2 + Wave B 设置字段）
 │   ├── runtime.py          # 冻结包适配：资源根 / 用户数据目录 / 标准流重定向
-│   ├── paths.py / models.py / events.py / server.py
-│   ├── agent/              # M2：mcp_server / auth / provider / ops
+│   ├── paths.py / models.py / events.py / server.py / update.py / diagnose.py
+│   ├── agent/              # M2：mcp_server / auth / provider / ops / registry / journal
+│   ├── views/              # B1：query（内存查询引擎）/ schema（字段推断）/ store（*.base）
+│   ├── index/              # SQLite FTS5 + 链接图 + sqlite_vec / onnx_embedder / models
 │   ├── parser/             # frontmatter / wikilink / tags / renderer / outline
-│   ├── index/              # SQLite FTS5 + 内存链接图
 │   ├── vault/              # VaultService 统一写路径 + watcher + 链接重写 + 回收站 + snapshots
 │   └── api/                # REST 路由（system/notes/files/search/graph/trash/templates/export/
-│                           #   agent/organize/history/provider）+ /ws/events
+│                           #   agent/organize/history/provider/views/vector/update/diagnose/inbox）
 ├── static/
 │   ├── index.html          # 三栏 + ribbon + 面板 + 浮层 + 设置页 + 登录/开屏
 │   ├── css/                # themes/base/layout/panels/shell/editor/splash
-│   ├── js/                 # 28 个 ES Module（无构建链）
+│   ├── js/                 # 52 个 ES Module（无构建链），含 bases / diagnose / capture / inbox
 │   └── vendor/codemirror/  # vendored CM5（缺失时自动降级增强 textarea）
-├── tests/                  # pytest：解析器/索引/写路径/API/P1/M2/性能
-└── docs/                   # ARCHITECTURE.md / PRD.md / QA-REPORT.md / 图
+├── tests/                  # pytest：解析器/索引/写路径/API/P1/M2/契约矩阵/视图/向量/体检
+└── docs/                   # ARCHITECTURE.md / PRD.md / PRODUCT-PLAN.md / QA-REPORT.md / 图
 ```
 
 ## 架构硬约束
@@ -176,7 +198,7 @@ Kwey/
 ## 测试
 
 ```bash
-python -m pytest tests/ -v            # 全量：837 passed / 5 skipped
+python -m pytest tests/ -v            # 全量：1099 passed / 5 skipped
 python -m pytest tests/ -m perf -v    # 仅性能基准
 ```
 

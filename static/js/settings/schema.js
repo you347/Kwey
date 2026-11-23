@@ -15,7 +15,7 @@
  */
 
 /** 与 app/server.py 的 FastAPI(version=...) 对齐；仅用于「关于」卡展示。 */
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 
 export const GROUPS = [
   {
@@ -224,18 +224,41 @@ export const GROUPS = [
     desc: 'FTS5 全文 + 向量 + 链接图，经 RRF 融合排序',
     cards: [
       {
-        title: '向量检索',
+        title: '语义检索',
         id: 'vector-section',
-        desc: 'mode=hybrid 时生效；未安装 chromadb 会自动降级为纯 FTS',
-        note: '模型默认 bge-small-zh-v1.5（需 sentence-transformers，首次联网下载）；填 hashing 用免下载词向量。重建只读磁盘笔记，不改原文。',
+        desc: '本地 ONNX 模型，离线可用；不再依赖 chromadb',
+        note: '自动模式优先用本地模型（bge-small-zh，24MB，首次点「下载模型」）；未就绪时若有已配置的 Provider，可改用 API embedding；最后才用哈希词向量兜底。向量库在 .kwey/vector.db，可随时重建。',
         rows: [
           {
             type: 'switch', id: 'vector-enabled', label: '启用向量',
             hint: { id: 'vector-status', text: '状态读取中…' },
           },
           {
-            type: 'text', id: 'vector-model', label: 'Embedding 模型',
-            placeholder: 'bge-small-zh-v1.5（或 hashing 免下载）',
+            type: 'select', id: 'vector-backend', label: '向量后端',
+            options: [
+              ['auto', '自动（优先 sqlite-vec）'],
+              ['sqlite-vec', 'sqlite-vec（推荐）'],
+              ['chroma', 'Chroma（老配置）'],
+              ['null', '关闭后端'],
+            ],
+          },
+          {
+            type: 'select', id: 'vector-embedder', label: 'Embedding 来源',
+            options: [
+              ['auto', '自动（本地 → API → 哈希）'],
+              ['local', '仅本地 ONNX 模型'],
+              ['api', '仅 API embedding'],
+              ['hashing', '仅哈希词向量（零依赖）'],
+            ],
+          },
+          {
+            type: 'text', id: 'vector-model', label: '本地模型',
+            placeholder: 'bge-small-zh-v1.5',
+            hint: { id: 'vector-model-status', text: '模型状态读取中…' },
+          },
+          {
+            type: 'text', id: 'vector-api-model', label: 'API 模型',
+            placeholder: '留空 = 不用 API（如 text-embedding-v3）',
           },
           { type: 'text', id: 'vector-weight', label: '向量权重', inputType: 'number', placeholder: '1.0' },
           { type: 'text', id: 'vector-graph-weight', label: '图权重', inputType: 'number', placeholder: '0.5' },
@@ -243,13 +266,15 @@ export const GROUPS = [
           {
             type: 'action',
             buttons: [
+              { id: 'btn-vector-download', text: '下载模型', title: '下载 24MB 量化模型到用户目录' },
               { id: 'btn-vector-save', text: '保存配置', variant: 'primary' },
-              { id: 'btn-vector-rebuild', text: '重建索引' },
+              { id: 'btn-vector-rebuild', text: '重建索引', title: '后台重建，进度见上方状态行' },
             ],
           },
           {
-            type: 'link', label: '知识编译面板', meta: 'raw → wiki',
-            action: 'compile.open',
+            type: 'action', label: '语义试查',
+            buttons: [{ id: 'btn-vector-test', text: '试查一句话' }],
+            hint: { id: 'vector-test-result', text: '用一句话验证「换个说法也能搜到」' },
           },
         ],
       },
@@ -322,6 +347,11 @@ export const GROUPS = [
         note: '磁盘 Markdown 是唯一事实源；索引损坏时删除 .kwey/index.db 重开即自动重建。',
         rows: [
           { type: 'custom', full: true, mount: 'about-meta' },
+          {
+            type: 'action', label: '版本更新',
+            buttons: [{ id: 'btn-update-check', text: '检查更新' }],
+            hint: { id: 'update-status', text: `当前 v${APP_VERSION}` },
+          },
           {
             type: 'link', label: '项目文档', meta: 'docs/ARCHITECTURE.md',
             action: 'about.copy-doc',

@@ -122,6 +122,11 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     from app.api.routes_review import router as review_router
     from app.api.routes_clip import router as clip_router
     from app.api.routes_import import router as import_router
+    from app.api.routes_views import router as views_router
+    from app.api.routes_vector import router as vector_router
+    from app.api.routes_update import router as update_router
+    from app.api.routes_health import router as health_router
+    from app.api.routes_inbox import router as inbox_router
 
     app.include_router(system_router)
     app.include_router(static_router)
@@ -151,6 +156,11 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     app.include_router(review_router)
     app.include_router(clip_router)
     app.include_router(import_router)   # P0 库导入（Obsidian / Markdown）
+    app.include_router(views_router)    # Bases 式结构化视图
+    app.include_router(vector_router)   # 语义检索（模型下载/重建/试查）
+    app.include_router(update_router)   # 版本检查（告知式更新）
+    app.include_router(health_router)   # 知识体检
+    app.include_router(inbox_router)    # 快速捕获 + AI 收件箱
 
     # ---------------------------------------------------------- 静态托管
     @app.middleware("http")

@@ -85,7 +85,7 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 | 20 | 快捷键自定义设置 | Hotkeys |
 | 21 | 导出：MD / HTML / PDF | Export |
 | 22 | git 快照：时间线 + 一键回滚 | File recovery |
-| 23 | 向量语义检索（Chroma）+ 与 FTS5 混合排序 | Omnisearch 类 |
+| 23 | 向量语义检索（**sqlite-vec + 本地 ONNX**，已进包）+ 与 FTS5 混合排序 | Omnisearch 类 |
 | 24 | 回收站恢复 | .trash |
 
 ### P2 — 远期（M4+）
@@ -102,16 +102,25 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 ## 五、Agent 双向连接规格
 
 ### 外部 Agent → Kwey（MCP Server，sidecar 进程）
+
+契约 v1 共 **28 个工具**（`app/agent/registry.py` 为唯一真源，MCP 与 REST 同源）：
+检索读类 9 + 结构/体检读类 3 + 写类 15 + admin 1。
+
 | tool | 功能 |
 |---|---|
-| kwey.search | 混合检索（FTS5+向量+图扩展），参数 scope/filter |
-| kwey.read | 读笔记原文 + frontmatter + 链接 |
-| kwey.write | 覆写（自动快照） |
-| kwey.create | 新建笔记（可带 tags/links） |
-| kwey.link | 建双链 |
-| kwey.tags | 增删标签 |
-| kwey.graph.query | 取邻居/相关笔记 |
-| kwey.organize | 高层整理任务（委派给 Provider） |
+| kwey.search | 混合检索（FTS5+向量+图扩展），mode=fts/hybrid |
+| kwey.read | 读笔记原文 + frontmatter + 链接（offset/max_chars 续读） |
+| kwey.open | 让界面打开笔记/目录（正文不回流） |
+| kwey.write / kwey.create / kwey.append | 写入三态（覆写 / 新建 / 追加），全部走统一写路径 |
+| kwey.delete / kwey.move / kwey.rename / kwey.dir.create / kwey.dir.delete | 文件管理（进回收站，非抹除） |
+| kwey.link / kwey.tags / kwey.graph.query | 双链 / 标签 / 邻域 |
+| kwey.tree / kwey.trash.list / kwey.trash.restore / kwey.trash.purge | 树 / 回收站（purge 需 admin+confirm） |
+| kwey.history.log / kwey.history.rollback | 快照时间线 / 回滚（confirm） |
+| kwey.audit | 写入归因（谁改了什么） |
+| kwey.organize / kwey.organize.apply | 自然语言整理（预演 / confirm 后落盘） |
+| **kwey.views.list / kwey.views.query / kwey.views.save** | **结构化视图：列定义 / 按视图取行 / 存视图** |
+| **kwey.diagnose** | **知识体检（六类问题 + 健康分，只读）** |
+| **kwey.capture** | **快速捕获进收件箱** |
 
 笔记同时作为 MCP resources 暴露。鉴权：本地 token，权限分 read-only / write / admin。
 
@@ -121,10 +130,34 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 
 ## 六、里程碑
 
-- **M1 可用内核**：P0 全部（编辑器、双链、搜索、文件管理）
-- **M2 Agent Link**：MCP server、事件总线、Provider+diff 确认、快照回滚 ← 核心差异先落地
-- **M3 体验补全**：图谱、向量检索、模板、每日笔记、分屏、导出
-- **M4 特点功能**：待构思（占位）
+- **M1 可用内核**：P0 全部（编辑器、双链、搜索、文件管理）✅
+- **M2 Agent Link**：MCP server、事件总线、Provider+diff 确认、快照回滚 ← 核心差异先落地 ✅
+- **M3 体验补全**：图谱、向量检索、模板、每日笔记、分屏、导出 ✅
+- **M4 特点功能**：F1/F2/F3/F4 + P2（Canvas/Slides/周期/主题/插件市场）✅
+- **M5 分发与结构化**（2026-11）：Bases 式视图、语义检索进包、安装器/更新、体检/捕获/收件箱 ✅
+
+## 六之二、结构化视图规格（Bases，M5）
+
+**为什么不做 Dataview 式查询语言**：Dataview 用 JS 表达式换来表达力，也换来「笔记里的代码能读文件」的安全洞。
+Kwey 只做属性白名单：≥90% 的日常需求是「按属性筛 + 排序 + 分组 + 求和」，这些不需要图灵完备。
+
+- 定义存 `<vault>/views/<slug>.base`（YAML，`kwey: true` 清单字段），属于**用户资产**，随 git 同步
+- 引擎：`app/views/query.py` 纯内存（索引快照 `notes/props/tags`），条件操作符白名单
+  `= != > >= < <= contains not_contains in not_in exists empty before after`
+- 快照缓存以 `(COUNT(*), MAX(mtime))` 为戳，TTL 1s；写路径后显式 `invalidate_cache()`
+- 单元格写回 → `VaultService.write_note`（只改一个 frontmatter 字段，正文原样），绝不直接改文件
+- AI 建视图：只用 `schema.py` 给出的真实字段名，产出定义先预览、人确认才落盘（不自动保存）
+- 兼容 Obsidian Bases 子集（`filters.and` / `views[0].type|order|sort` / `file.hasTag()` / `file.inFolder()`）
+
+## 六之三、语义检索规格（M5）
+
+- 存储：`<vault>/.kwey/vector.db`（独立连接，避免给主索引加载扩展）
+- 索引：`vec0` 虚拟表，`distance_metric=cosine`；模型名写 `vec_meta`，换模型即 DROP 重建
+- Embedder 链：本地 ONNX（bge-small-zh-v1.5，CLS 池化 + L2 归一化）→ OpenAI 兼容 `/embeddings` → sentence-transformers → hashing
+- 分词：纯 Python BERT WordPiece（CJK 逐字、标点切分、`##` 续词、贪心最长匹配），不引 tokenizers 依赖
+- 查询侧加 bge 前缀「为这个句子生成表示以用于检索相关文章：」
+- 零向量不入索引（否则 `distance` 为 NULL 会污染排序）；向量永远可重建，不是事实源
+- 打包：`sqlite_vec` 的 `vec0.dll` 与 `onnxruntime` 动态库由 spec 收集，模型进 `_internal/models/`
 
 ## 七、特点功能（Kwey 差异化核心，M4 重点）
 

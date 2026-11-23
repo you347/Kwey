@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -20,6 +21,15 @@ logger = logging.getLogger("kwey.indexer")
 
 MARKDOWN_EXTS = {".md", ".markdown"}
 NOTE_EXTS = MARKDOWN_EXTS
+
+_EXCERPT_STRIP = re.compile(r"(^|\s)#{1,6}\s+|[*_`>]+|!\[[^\]]*\]\([^)]*\)|\[([^\]]*)\]\([^)]*\)")
+
+
+def _excerpt(body: str, limit: int = 180) -> str:
+    """正文前 limit 字摘要（去 markdown 噪声、压空白）。供卡片视图/列表预览。"""
+    text = _EXCERPT_STRIP.sub(lambda m: m.group(2) or " ", body or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
 
 
 class Indexer:
@@ -113,7 +123,9 @@ class Indexer:
                 size=stat.st_size,
                 created=fm.get("created") if isinstance(fm.get("created"), str) else None,
                 updated=fm.get("updated") if isinstance(fm.get("updated"), str) else None,
+                excerpt=_excerpt(body),
             )
+            self.db.upsert_props(rel, fm)
             self.db.replace_links(rel, rows)
             self.db.replace_tags(rel, self._parse_tags(fm, body))
             self.db.upsert_fts(rel, title, body, " ".join(self._all_tags(fm, body)))

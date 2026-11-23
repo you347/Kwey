@@ -17,8 +17,9 @@ console=False（窗口化）时没有控制台，main.py 会把 stdout/stderr �
 """
 
 import os
+from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 # uvicorn 的协议实现（h11/httptools、websockets/wsproto、lifespan）全是运行时
 # 按名字加载的，静态分析看不到，必须显式收集。
@@ -34,9 +35,22 @@ hiddenimports += [
     # 运行期才 import 的可选能力
     "reportlab.pdfbase.cidfonts",
     "reportlab.pdfbase.ttfonts",
+    # 语义检索：sqlite-vec 的 vec0.dll 由三处收集，缺一处运行期就降级
+    "sqlite_vec",
+    "onnxruntime",
+    "numpy",
 ]
 
 datas = [("static", "static")]
+# sqlite_vec.load() 按包内相对路径找 vec0.dll，必须原样带进包
+datas += collect_data_files("sqlite_vec", includes=["*.dll"])
+binaries = collect_dynamic_libs("sqlite_vec")
+binaries += collect_dynamic_libs("onnxruntime")
+
+# 本地 embedding 模型：有就内置（离线开箱可用），没有则运行期按需下载
+_models = Path("models")
+if _models.is_dir() and any(_models.rglob("model.onnx")):
+    datas.append(("models", "models"))
 
 excludes = [
     "pytest",
@@ -53,7 +67,7 @@ excludes = [
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -71,6 +85,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Kwey",
+    icon="static/icons/kwey.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
