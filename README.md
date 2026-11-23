@@ -64,6 +64,7 @@
 | A2 | **混合检索解锁**：`mode=hybrid` 真做 FTS+向量+图 RRF；settings.vector 可写、缺 chromadb 自动降级；MCP `kwey.search` 同走 hybrid | 设置页「向量检索」开关/模型/权重/重建；`GET /api/search/vector/status`、`POST /api/search/vector/rebuild` |
 | WS 鉴权 | A4 遗留落地：`/ws/events?token=` 三级校验，无效 close 4401 / 越权 4403；无 token 仅本地回环放行 | 浏览器 UI 无感知；远端需带 token |
 | F2 | **每日自动推送**：启动/切 vault 自动补推，`pull --rebase` 冲突暂停、下次启动补推；设置页可直接绑定仓库地址（写 `.git/config`，凭据交给系统 git） | 设置页「每日自动推送」区块（地址/绑定/远端/分支/时间/模板/包含目录）；`/api/autopush/config|run|status|remotes|bind`；命令 `autopush.run` |
+| Import | **库导入（P0）**：从 Obsidian / Logseq / 任意 Markdown 目录迁入，先扫描预览（只读）再落盘；保留目录结构与附件，三种同名冲突策略，批量导入只提交一次快照 | 设置页「导入已有笔记库」；`POST /api/import/scan`、`POST /api/import/apply` |
 | PDF | **PDF / 打印导出**：reportlab 开箱、weasyprint 可选增强；图片 base64 内联 | 命令「导出当前笔记为 PDF」「打印 / 另存为 PDF」；`GET /api/export?format=pdf|print` |
 
 - 新命令面板入口：F1 知识编译、个人信息库、自动推送、导出 PDF / 打印；新浮层 `#overlay-compile` 与记忆面板（自绘 DOM）。

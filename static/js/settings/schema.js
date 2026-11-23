@@ -121,6 +121,36 @@ export const GROUPS = [
           },
         ],
       },
+      {
+        title: '导入已有笔记库',
+        id: 'import-section',
+        desc: '从 Obsidian / Logseq / 任意 Markdown 文件夹迁入，保留目录结构与附件',
+        note: '先扫描预览（只读，不写盘），确认后再导入；源库不会被修改。',
+        rows: [
+          {
+            type: 'path', id: 'import-source', label: '源目录',
+            placeholder: 'D:/我的知识库', pickerId: 'import-pick', pickerText: '选择',
+            hint: { id: 'import-hint', text: '选择 vault 根目录（含 .obsidian 的那一层）' },
+          },
+          {
+            type: 'select', id: 'import-conflict', label: '同名冲突',
+            options: [
+              ['rename', '自动改名（保留两者）'],
+              ['skip', '跳过已有'],
+              ['overwrite', '覆盖已有'],
+            ],
+          },
+          { type: 'switch', id: 'import-attachments', label: '同时导入附件', checked: true },
+          {
+            type: 'action',
+            hint: { id: 'import-status', text: '' },
+            buttons: [
+              { id: 'import-scan', text: '扫描预览', variant: 'primary' },
+              { id: 'import-apply', text: '开始导入' },
+            ],
+          },
+        ],
+      },
     ],
   },
   {

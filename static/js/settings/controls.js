@@ -69,7 +69,12 @@ function switchRow(row) {
   const el = inputEl(row, 'checkbox');
   el.className = 'settings-switch';
   el.setAttribute('role', 'switch');
-  el.setAttribute('aria-checked', 'false');
+  if (row.checked !== undefined) {
+    el.checked = !!row.checked;
+    el.setAttribute('aria-checked', String(!!row.checked));
+  } else {
+    el.setAttribute('aria-checked', 'false');
+  }
   return withHint(row, rowShell(row, el));
 }
 

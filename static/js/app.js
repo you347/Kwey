@@ -43,6 +43,7 @@ import { initThemeEditor } from './themeeditor.js';
 import { initRag } from './rag.js';
 import { initReview } from './review.js';
 import { initClipper } from './clipper.js';
+import { initImporter } from './importer.js';
 
 let autosaveRunner = null;
 let wsClosed = null;
@@ -173,6 +174,7 @@ async function startVaultUI() {
   initRag();
   initReview();
   initClipper();
+  initImporter();
   initPulse();
   hotkeys.refresh();
   shell.onVaultReady();

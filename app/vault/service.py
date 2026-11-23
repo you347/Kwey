@@ -19,9 +19,10 @@ import re
 import shutil
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from fastapi import HTTPException
 
@@ -80,6 +81,7 @@ class VaultService:
         self.recent_self_writes: Dict[str, float] = {}
         self._watcher = None  # 由 deps 装配；start_watcher/stop_watcher 转发
         self._snapshots = None  # M2 git 快照服务，由 deps 装配
+        self._suppress_snapshots = 0  # >0 时暂停自动快照（批量导入/迁移用）
 
     # ------------------------------------------------------------------ lifecycle
     def bind_watcher(self, watcher) -> None:
@@ -88,6 +90,21 @@ class VaultService:
     def bind_snapshots(self, snapshots) -> None:
         """注入 M2 git 快照服务（可选能力，关闭时不影响主写路径）。"""
         self._snapshots = snapshots
+
+    @contextmanager
+    def bulk_write(self) -> Iterator[None]:
+        """批量写模式：期间跳过逐篇自动快照，结束后统一提交一次。
+
+        导入 800 篇笔记若逐篇 commit，会生成 800 次 git 快照（分钟级开销）；
+        批量模式下只在收尾提交一条 ``bulk: N 篇`` 记录。
+        """
+        with self.lock:
+            self._suppress_snapshots += 1
+        try:
+            yield
+        finally:
+            with self.lock:
+                self._suppress_snapshots = max(0, self._suppress_snapshots - 1)
 
     def _auto_snapshot(self, action: str, rel: str = "") -> None:
         """统一写路径的快照挂钩：写盘成功后按设置生成 commit。
@@ -100,6 +117,8 @@ class VaultService:
         if svc is None or not cfg.get("enabled", False):
             return
         if not cfg.get("auto_commit", True):
+            return
+        if self._suppress_snapshots:
             return
         try:
             svc.enabled = True

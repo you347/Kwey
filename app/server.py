@@ -121,6 +121,7 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     from app.api.routes_rag import router as rag_router
     from app.api.routes_review import router as review_router
     from app.api.routes_clip import router as clip_router
+    from app.api.routes_import import router as import_router
 
     app.include_router(system_router)
     app.include_router(static_router)
@@ -149,6 +150,7 @@ def create_app(initial_vault: Optional[str] = None, start_watcher: bool = False)
     app.include_router(rag_router)
     app.include_router(review_router)
     app.include_router(clip_router)
+    app.include_router(import_router)   # P0 库导入（Obsidian / Markdown）
 
     # ---------------------------------------------------------- 静态托管
     @app.middleware("http")
