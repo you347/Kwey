@@ -382,12 +382,15 @@ function renderContent() {
   if (!result || !result.rows) { renderEmpty(); return; }
   if (!result.rows.length) { renderEmpty('没有匹配的笔记', true); return; }
 
-  if (result.mode === 'cards') return renderCards(result);
-  if (result.mode === 'list') return renderListMode(result);
+  // 用 bs.def.mode（当前选择）而不是 result.mode（上次查询时的快照）：
+  // 切模式只重渲染、不重查，读 result 会一直停在旧模式。
+  const mode = bs.def?.mode || result.mode || 'table';
+  if (mode === 'cards') return renderCards(result);
+  if (mode === 'list') return renderListMode(result);
   renderTable(result);
 }
 
-function showEmpty(message, inline = false) {
+function renderEmpty(message, inline = false) {
   const actions = inline ? '' : `
     <div class="bases-empty__actions">
       <button class="btn btn--mini btn--primary" data-act="ai">用一句话建视图</button>

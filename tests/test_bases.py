@@ -97,6 +97,30 @@ class TestQueryEngine:
         assert result["total"] == 3
         assert all(row["path"].startswith("projects/") for row in result["rows"])
 
+    def test_sort_mixed_types_never_crashes(self, bases_vault, bases_services):
+        """同一列可能既有数字又有文字（frontmatter 是手写的）——排序不能抛 TypeError。"""
+        (bases_vault / "projects" / "mixed.md").write_text(
+            "---\ntitle: 混合\npriority: 高\n---\n\n# 混合\n\npriority 写了中文。\n",
+            encoding="utf-8",
+        )
+        deps.require_indexer().reindex_note("projects/mixed.md", broadcast=False)
+
+        from app.views.query import cached_snapshot
+
+        snapshot = cached_snapshot(deps.require_vault().db)
+        for key in ("priority", "title", "due"):
+            defn = normalize_definition({"name": "x", "sort": [{"key": key, "dir": "asc"}]})
+            result = run_query(snapshot, defn)
+            assert result["total"] >= 4, key
+        defn = normalize_definition({"name": "x", "sort": [{"key": "priority", "dir": "desc"}]})
+        rows = run_query(snapshot, defn)["rows"]
+        # 文字档（rank 2）与数字档（rank 0）分档比较，降序时文字档在前
+        assert rows[0]["path"] == "projects/mixed.md"
+        # 无论升序降序，空值（这里是日记的 priority）都在最后一行
+        asc = run_query(snapshot, normalize_definition(
+            {"name": "x", "sort": [{"key": "priority", "dir": "asc"}]}))["rows"]
+        assert asc[-1]["path"].startswith("daily/")
+
     def test_where_and_sort(self, bases_services):
         from app.views.query import cached_snapshot
 

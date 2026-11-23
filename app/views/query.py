@@ -330,19 +330,25 @@ def match_condition(value: Any, op: str, target: Any) -> bool:
     return False
 
 
-def _sort_value(value: Any) -> Tuple[int, Any]:
-    """排序键：空值永远排最后；数字/时间按数值，其余按小写字符串。"""
+def _sort_value(value: Any) -> Tuple[int, float, str]:
+    """排序键：``(类别, 数值, 字符串)`` 三段式，保证任意混合列都能比较。
+
+    为什么不直接返回 ``(0, value)``：frontmatter 是用户手写的，同一列可能既有
+    ``2026``（int）又有 ``"待定"``（str），直接比会 TypeError。这里按类型分档：
+    0 数值/时间 → 2 普通字符串 → 9 空值（空值永远排最后）。
+    前两段类型固定，永远不会跨类型比较。
+    """
     if value in (None, "", [], {}):
-        return (1, "")
+        return (9, 0.0, "")
     if isinstance(value, (list, tuple)):
-        return (0, " ".join(str(v) for v in value).lower())
+        return (1, 0.0, " ".join(str(v) for v in value).lower())
     num = _as_number(value)
     if num is not None:
-        return (0, num)
+        return (0, float(num), "")
     ts = _as_ts(value)
     if ts is not None and isinstance(value, str):
-        return (0, ts)
-    return (0, str(value).lower())
+        return (0, float(ts), "")
+    return (2, 0.0, str(value).lower())
 
 
 # --------------------------------------------------------------------- definition
@@ -462,6 +468,21 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
+def _sort_rows(rows: List[Dict[str, Any]], value_of, desc: bool) -> None:
+    """原地排序：空值永远在最后（升序降序都一样），其余按升/降。
+
+    直接 ``rows.sort(reverse=desc)`` 会把空值顶到降序的第一行——表格里
+    一屏空行很难看，所以把空值单独摘出来追加在尾部。
+    """
+    empty = [row for row in rows if _sort_value(value_of(row))[0] == 9]
+    if empty:
+        filled = [row for row in rows if _sort_value(value_of(row))[0] != 9]
+        filled.sort(key=lambda row: _sort_value(value_of(row)), reverse=desc)
+        rows[:] = filled + empty
+    else:
+        rows.sort(key=lambda row: _sort_value(value_of(row)), reverse=desc)
+
+
 def run_query(
     snapshot: Dict[str, Any],
     definition: Dict[str, Any],
@@ -517,10 +538,7 @@ def run_query(
     if sort_rules:
         for rule in reversed(sort_rules):
             key, desc = rule["key"], rule.get("dir") == "desc"
-            matched.sort(
-                key=lambda row: _sort_value(resolve_value(snapshot, row["path"], key)),
-                reverse=desc,
-            )
+            _sort_rows(matched, lambda row, k=key: resolve_value(snapshot, row["path"], k), desc)
     else:
         matched.sort(key=lambda row: -(row["note"].get("mtime") or 0))
 
