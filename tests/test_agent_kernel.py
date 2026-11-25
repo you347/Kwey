@@ -157,7 +157,7 @@ def test_tool_names_sanitized_and_mapped_back(vault, monkeypatch):
     monkeypatch.setattr(AgentProvider, "chat", fake)
     events = list(kernel.run_chat(USER, vault=vault))
     tools = captured["tools"]
-    assert len(tools) == 28  # 契约新增 kwey.open / kwey.audit / views / diagnose / capture
+    assert len(tools) == 29  # 契约新增 kwey.open / audit / views / diagnose / capture / session.distill
     for t in tools:
         fn = t["function"]["name"]
         assert "." not in fn and fn.replace("_", "").isalnum()

@@ -32,6 +32,8 @@ WRITE_TOOLS = {
     "kwey.trash.restore", "kwey.history.rollback", "kwey.organize.apply",
     # W4：视图落盘 / 快速捕获
     "kwey.views.save", "kwey.capture",
+    # P2-C：会话蒸馏（只产出待审草案）
+    "kwey.session.distill",
 }
 ADMIN_TOOLS = {"kwey.trash.purge"}
 EXPECTED_TOOLS = READ_TOOLS | WRITE_TOOLS | ADMIN_TOOLS

@@ -1,4 +1,4 @@
-"""卡A W3：28 工具矩阵一致性测试（元数据 / MCP parity / REST 权限 / schema 边界）。
+"""卡A W3：29 工具矩阵一致性测试（元数据 / MCP parity / REST 权限 / schema 边界）。
 
 与 test_contract.py（W1 行为）、test_contract_w2.py（W2 行为）互补：
 本文件不重复业务往返，只钉住「全矩阵」的结构不变式与传输层一致性。
@@ -58,12 +58,12 @@ def _h(token: str) -> dict:
 
 # ---------------------------------------------------------------- 矩阵规模与元数据
 def test_matrix_size_and_tiers():
-    assert len(ALL_TOOLS) == 28
+    assert len(ALL_TOOLS) == 29
     assert len(READ_NAMES) == 12
-    assert len(WRITE_NAMES) == 15
+    assert len(WRITE_NAMES) == 16
     assert len(ADMIN_NAMES) == 1
     assert ADMIN_NAMES == ["kwey.trash.purge"]
-    assert len(set(ALL_NAMES)) == 28
+    assert len(set(ALL_NAMES)) == 29
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=ALL_NAMES)

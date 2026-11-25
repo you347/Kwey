@@ -103,8 +103,8 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 
 ### 外部 Agent → Kwey（MCP Server，sidecar 进程）
 
-契约 v1 共 **28 个工具**（`app/agent/registry.py` 为唯一真源，MCP 与 REST 同源）：
-检索读类 9 + 结构/体检读类 3 + 写类 15 + admin 1。
+契约 v1 共 **29 个工具**（`app/agent/registry.py` 为唯一真源，MCP 与 REST 同源）：
+检索读类 9 + 结构/体检读类 3 + 写类 16 + admin 1。
 
 | tool | 功能 |
 |---|---|
@@ -121,6 +121,7 @@ Vault Service（统一写路径：加锁 → 写盘 → 防抖重索引 → 广�
 | **kwey.views.list / kwey.views.query / kwey.views.save** | **结构化视图：列定义 / 按视图取行 / 存视图** |
 | **kwey.diagnose** | **知识体检（六类问题 + 健康分，只读）** |
 | **kwey.capture** | **快速捕获进收件箱** |
+| **kwey.session.distill** | **跨 Agent 会话蒸馏：六类槽位 → 待审草案（幂等，不写普通笔记）** |
 
 笔记同时作为 MCP resources 暴露。鉴权：本地 token，权限分 read-only / write / admin。
 

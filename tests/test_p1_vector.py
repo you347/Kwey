@@ -331,7 +331,10 @@ class TestChromaBackend:
             reopened.close()
 
     def test_factory_enabled_hashing_model(self, tmp_path):
-        backend = build_vector_index(tmp_path, {"enabled": True, "model": "hashing"})
+        """显式 backend=chroma：跳过 auto 对 sqlite-vec 的优先选择，测 Chroma 分支。"""
+        backend = build_vector_index(
+            tmp_path, {"enabled": True, "backend": "chroma", "model": "hashing"}
+        )
         try:
             assert isinstance(backend, ChromaBackend)
             assert backend.name == "chroma"
@@ -358,11 +361,13 @@ class TestChromaBackend:
             backend.close()
 
     def test_settings_enabled_wiring(self, vault_dir):
-        """settings.json 开启 vector（model=hashing）→ Indexer 自动装 ChromaBackend。"""
+        """settings.json 开启 vector（model=hashing）→ Indexer 按可用后端自动接线。"""
         from fastapi.testclient import TestClient
 
+        from app.index import sqlite_vec
         from app.server import create_app
 
+        expected = "sqlite-vec" if sqlite_vec.available() else "chroma"
         (vault_dir / ".kwey").mkdir(parents=True, exist_ok=True)
         (vault_dir / ".kwey" / "settings.json").write_text(
             json.dumps({"vector": {"enabled": True, "model": "hashing"}}), encoding="utf-8"
@@ -371,11 +376,11 @@ class TestChromaBackend:
         try:
             deps.init_services(vault_dir)
             indexer = deps.require_indexer()
-            assert isinstance(indexer.vector, ChromaBackend)
+            assert indexer.vector.name == expected
             assert indexer.vector.count() == 3
             with TestClient(create_app()) as c:
                 data = _search(c, "会议", "hybrid")
-                assert data["vector"]["backend"] == "chroma"
+                assert data["vector"]["backend"] == expected
                 assert any(h["path"] == "notes/工作/会议记录.md" for h in data["hits"])
         finally:
             deps.reset_services()

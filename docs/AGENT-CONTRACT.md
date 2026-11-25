@@ -32,7 +32,7 @@ REST + SSE 两条成熟通道，新增线缆协议只增加维护面，不增加
 4. journal 与 git 快照是增强能力：二者失败只记日志，绝不阻断写盘。
 5. `invoke` 在 `actor=None` 时不写 journal（进程内纯调用与测试保持无副作用留痕）。
 
-## 2. 工具矩阵（22）
+## 2. 工具矩阵（29）
 
 ### 2.1 元数据字段
 
@@ -45,22 +45,50 @@ REST + SSE 两条成熟通道，新增线缆协议只增加维护面，不增加
 | `side_effect` | `read` / `reversible` / `irreversible` | 副作用分级（§6） |
 | `journal_action` | 动作字符串 / `null` | 留痕动作；读工具为 `null` |
 
-### 2.2 读工具（8）
+### 2.2 读工具（12）
 
 统一元数据：`permission=read`，`side_effect=read`，`journal_action=null`。
 
 | 名称 | 用途 | 必填参数 | 缺省参数 |
 |---|---|---|---|
-| `kwey.search` | FTS5 BM25 全文搜索，支持 `path:`/`tag:`/`file:` 操作符，返回 `hits` | `query`（空串为纯过滤浏览） | `limit=50`（1-200），`mode="fts"`（enum：fts/hybrid） |
-| `kwey.read` | 读笔记正文（默认最多 8000 字符）；返回 `path/title/content/frontmatter/mtime/offset/total_chars/truncated` | `path` | `offset=0`（0-1000000），`max_chars=8000`（1-40000） |
+| `kwey.search` | FTS5 BM25 全文搜索，支持 `path:`/`tag:`/`file:` 操作符，返回 `hits`；默认对未生效/过期/被替代降权并附可选 `freshness`（additive） | `query`（空串为纯过滤浏览） | `limit=50`（1-200），`mode="fts"`（enum：fts/hybrid），`as_of`（ISO 日期/时间；缺省当前） |
+| `kwey.read` | 读笔记正文（默认最多 8000 字符）；返回 `path/title/content/frontmatter/mtime/offset/total_chars/truncated`；有生命周期声明时附可选 `freshness` | `path` | `offset=0`（0-1000000），`max_chars=8000`（1-40000），`as_of`（ISO 日期/时间） |
 | `kwey.open` | 让界面打开笔记 / 定位目录（只返回 `path/kind`，不回传正文） | `path` | 无 |
 | `kwey.graph.query` | 内存 LinkGraph 双向 BFS 邻域 | `path` | `depth=1`（1-5） |
 | `kwey.organize` | 自然语言整理预演（纯计算不落盘），需配置 Provider | `instruction` | `paths` 缺省全库 |
 | `kwey.tree` | 嵌套文件树（隐藏 `.kwey/.trash/.git`，目录在前） | 无 | 无 |
 | `kwey.trash.list` | 回收站顶层条目（`trash_path/original_path/name/is_dir/mtime`，mtime 倒序） | 无 | 无 |
 | `kwey.history.log` | git 快照时间线，返回 `entries`（快照关闭时为空数组） | 无 | `path` 缺省全库，`limit=50`（1-200） |
+| `kwey.audit` | 写入归因查询（按 actor/role/action/path/since 过滤，倒序） | 无 | `limit=50`（1-500） |
+| `kwey.views.list` | 列出结构化视图定义（含完整 `definition`） | 无 | 无 |
+| `kwey.views.query` | 按视图定义查行（`slug` 或临时 `definition`） | 无 | `offset=0`，`limit` 缺省用定义值 |
+| `kwey.diagnose` | 知识体检（六类问题 + 0~100 分，只读） | 无 | `deep=true`，`stale_days`/`max_items` 缺省取设置 |
 
-### 2.3 写工具（13）
+#### 2.2.1 知识保鲜元数据（P2-D，additive）
+
+`kwey.search` / `kwey.read` 与 REST `GET /api/search`、`POST /api/rag/ask` 可选返回
+`freshness`；旧调用方忽略新增字段不受影响，**不新增工具数量**。
+
+- 声明字段（frontmatter，全部可选）：`valid_from`、`valid_until`、`superseded_by`
+  （vault 相对完整路径）、`fact_scope`（字符串或列表）、`verified_at`。
+- 区间统一 `[valid_from, valid_until)`；缺失端点无界；仅日期的 `valid_until`
+  规范到**当日本地日结束后**（次日 00:00）的排他边界，`valid_from` 取当日 00:00。
+- 状态：`current_declared` / `not_yet_effective_declared` / `expired_declared` /
+  `superseded_declared` / `unknown` / `invalid_metadata`。
+  `unknown` 是没有声明，不等同 `expired`；`invalid_metadata` 包含日期非法、起止颠倒、
+  替代目标缺失、自指或成环，明确提示而不静默降级。
+- `as_of`：显式传入时按该时点评估，历史查询不会被今天的状态压低；缺省为当前。
+  自然语言时间识别仅作提示，首版以显式参数为准。
+- 检索口径：候选融合后、最终截断前，对 `not_yet` / `expired` / `superseded` 降权
+  （不删除），并优先补入该时点有效的替代证据；FTS、hybrid、RAG 与 Agent 搜索一致。
+  用户可在笔记工具栏「知识保鲜」浮层一键关闭降权（`settings.freshness.downweight`）。
+- 返回形状（字段均为可选）：`freshness.state`、`freshness.valid_from`、
+  `freshness.valid_until`、`freshness.superseded_by`、`freshness.fact_scope`、
+  `freshness.verified_at`、`freshness.problems`、`freshness.replacement_state`；
+  搜索顶层另有 `freshness.as_of/enabled/evaluated/downweighted/replacements_added`。
+  被补入的替代候选带 `replacement_for`（原失效路径）。
+
+### 2.3 写工具（16）
 
 统一元数据：`permission=write`，`side_effect=reversible`（回收站、链接重写、
 快照留存三者保障可恢复）。
@@ -80,6 +108,9 @@ REST + SSE 两条成熟通道，新增线缆协议只增加维护面，不增加
 | `kwey.trash.restore` | 回收站恢复（目标已存在自动去重不覆盖） | `trash_path` | `target_path` 缺省回原路径 | `restore` |
 | `kwey.history.rollback` | 回滚到指定快照（自动留存回滚前 commit） | `hash`、`path` | `confirm=false`（必须 true，§6） | `rollback` |
 | `kwey.organize.apply` | 应用结构化 ops（create/append/tag/link/move/delete） | `ops`（对象数组） | `confirm=false`（必须 true，§6） | `organize` |
+| `kwey.views.save` | 创建/更新结构化视图定义（写 `views/<slug>.base`） | `definition`（至少含 `name`） | `slug` 缺省按名字新建 | `create` |
+| `kwey.capture` | 快速捕获进收件箱（`inbox/`） | `text`（≤50000 字） | `title` 缺省取首行，`tags` ≤10 个 | `create` |
+| `kwey.session.distill` | 标准会话输入 → 六类槽位待审草案（只写 `.kwey/session` 控制文件，幂等） | `payload`（标准对象，§2.6） | 无 | `create` |
 
 ### 2.4 管理工具（1）
 
@@ -107,6 +138,42 @@ REST + SSE 两条成熟通道，新增线缆协议只增加维护面，不增加
 非空字符串等业务约束留在 handler 内（`_req_str`），不在 schema 边界重复。
 `integer`/`number` 校验排除 `bool`（Python `bool` 是 `int` 子类）。
 
+### 2.6 会话蒸馏：持久草案与离线预览的差异
+
+`kwey.session.distill` 接收标准会话输入并**只产出待审草案**，不写普通笔记、不自动批准。
+
+```json
+{
+  "schema_version": 1,
+  "source": {"agent": "claude-code", "session_id": "session-example", "export_hash": "sha256:..."},
+  "goal": "当前任务的持久目标",
+  "events": [
+    {"id": "e1", "kind": "user", "text": "只改一个文件，不要推送", "ts": "2026-11-24T10:00:00+08:00"}
+  ],
+  "retention": "selected_evidence"
+}
+```
+
+- 硬限制：`schema_version=1`；`source.agent/session_id` 必填；`events` 非空、event id 唯一、
+  `kind ∈ user/assistant/tool_call/tool_result/system`；单条 text ≤20000 字、整体 ≤400000 字、
+  最多 2000 条；`retention` 首版仅 `selected_evidence`。
+- 校验失败 → `ContractError(400)`；服务端从实际输入计算 `export_hash`，不采信客户端声明值
+  （原值记入 `client_export_hash` 备查）。
+- 幂等键 = `agent + session_id + export_hash + parser_version`；同键重复提交返回既有
+  `draft_id`（`duplicate=true`），不覆盖旧结论；草案过期返回 `status=expired` 且引用段已清理。
+- 六类槽位：`decisions / constraints / refutations / open_items / knowledge_candidates`
+  以及输入级 `omissions`。每条候选必须带 `source_event_ids`，无依据不入库；约束只从
+  user 事件提取，环境/轮次限制不算证伪（记为未实测遗漏）。
+- 输出：`draft_id / status / idempotency_key / candidates / sources / omissions / stats /
+  draft_path`（`.kwey/session/drafts/<draft_id>.json`，不进索引）。
+
+CLI 的 `session distill --stdin --preview --json` 是**离线预览**：只输出候选、来源、遗漏与
+`preview_hash`，不创建控制文件/笔记、不返回 `draft_id`、不启动服务、不宣称已入队。
+两者不能都叫「保存成功」：MCP 会落持久待审草案，CLI 预览不持久化，也不承诺跨次去重。
+
+首版只接收标准 JSON 输入；未提供 Claude Code 原始 JSONL/`transcript_path` 适配器（无真实
+日志样本，未实测），不安装 hook、不修改外部 Agent 配置。
+
 ## 3. 调用流水线
 
 ### 3.1 流程图
@@ -123,7 +190,7 @@ graph TD
         M["MCP mcp_server（stdio 本地父进程）"]
     end
     subgraph 能力真源
-        C["contract v1（22 工具元数据）"]
+        C["contract v1（29 工具元数据）"]
         I["invoke（校验 → handler → journal）"]
     end
     subgraph 落盘与留痕
@@ -256,11 +323,11 @@ auto_commit 挂钩独立读配置，快照失败不阻断写盘。
 
 | 端点 | 等级 | 语义 |
 |---|---|---|
-| `GET /api/agent/contract` | read | 契约快照（version + 22 工具元数据，不含 handler） |
+| `GET /api/agent/contract` | read | 契约快照（version + 29 工具元数据，不含 handler） |
 | `POST /api/agent/tool` | read + 工具级 | 通用工具入口 `{name, arguments}` |
 | `GET /api/agent/health` | read | vault 信息 + 调用方 role |
-| `GET /api/agent/search` | read | `kwey.search` + `elapsed_ms` |
-| `GET /api/agent/note` | read | `kwey.read` |
+| `GET /api/agent/search` | read | `kwey.search` + `elapsed_ms`；可选 `as_of` |
+| `GET /api/agent/note` | read | `kwey.read`；可选 `as_of` |
 | `POST /api/agent/note` | write | `kwey.create` |
 | `PUT /api/agent/note` | write | `kwey.write` |
 | `DELETE /api/agent/note` | write | `kwey.delete` |
@@ -280,7 +347,7 @@ auto_commit 挂钩独立读配置，快照失败不阻断写盘。
 |---|---|
 | `initialize` | serverInfo name=kwey |
 | `notifications/initialized` | 空响应 |
-| `tools/list` | 由 `registry.contract()` 派生（`input_schema` → `inputSchema`），22 工具 |
+| `tools/list` | 由 `registry.contract()` 派生（`input_schema` → `inputSchema`），29 工具 |
 | `tools/call` | 名称 / 必填预检 → `registry.invoke(actor=MCP_ACTOR)` |
 | `resources/list` | 索引内全部笔记 → `kwey://note/<path>` 资源 |
 | `resources/read` | 字节级原文（读操作允许直接读盘，ARCHITECTURE §8.3） |
@@ -312,7 +379,8 @@ auto_commit 挂钩独立读配置，快照失败不阻断写盘。
 |---|---|---|
 | `tests/test_contract.py` | W1：契约形状、invoke 往返、校验矩阵、MCP/REST 错误映射、旧端点 parity | 41 |
 | `tests/test_contract_w2.py` | W2：12 新工具行为、confirm 闸门、journal actor、权限矩阵 | 21 |
-| `tests/test_contract_matrix.py` | W3：22 工具元数据不变式、MCP schema parity、REST 权限全矩阵、schema 边界 | 165 |
+| `tests/test_contract_matrix.py` | W3：29 工具元数据不变式、MCP schema parity、REST 权限全矩阵、schema 边界 | 165 |
+| `tests/test_session_distill.py` | P2-C：会话蒸馏输入/硬限制/锚点/幂等/过期/契约/CLI 离线预览 | 31 |
 | `tests/test_m2_mcp.py`、`tests/test_m2_snapshots.py` | M2 回归（工具数断言演进 9 → 21） | 计入全量 |
 
 全量：`py -m pytest -q` → 564 passed（W2 基线 399 + W3 矩阵 165）。

@@ -89,7 +89,10 @@ async def agent_chat(request: Request, req: ChatRequest):
     def gen():
         try:
             for event in kernel.run_chat(
-                req.messages, vault=vault, resume=req.resume, context=req.context
+                req.messages,
+                vault=vault,
+                resume=req.resume,
+                context=req.context,
             ):
                 yield _frame(event)
         except Exception as exc:  # noqa: BLE001 兜底：任何漏网异常都成帧，不抛穿流

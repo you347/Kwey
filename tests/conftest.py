@@ -85,3 +85,75 @@ def client(services):
 @pytest.fixture
 def vault(services):
     return deps.require_vault()
+
+
+# ---------------------------------------------------------------- 假时钟 / 假 Provider
+class FakeClock:
+    """可推进的假时钟；实例本身可调用，直接作为 duty 的 ``clock`` 注入。"""
+
+    def __init__(self, ts: float = 0.0) -> None:
+        self.ts = float(ts)
+
+    def __call__(self) -> float:
+        return self.ts
+
+    def set(self, ts: float) -> float:
+        self.ts = float(ts)
+        return self.ts
+
+    def advance(self, seconds: float) -> float:
+        self.ts += float(seconds)
+        return self.ts
+
+
+class FakeProvider:
+    """OpenAI 协议 Provider 的脚本化替身：按序返回 payload，不联网、不花钱。"""
+
+    def __init__(self, payloads=None, *, configured: bool = True) -> None:
+        self.configured = configured
+        self.config = {
+            "endpoint": "http://stub.local/v1",
+            "api_key": "SECRET-KEY",
+            "model": "test-model",
+            "protocol": "openai",
+            "timeout": 30.0,
+            "max_context_chars": 12000,
+        }
+        self.payloads = list(payloads or [])
+        self.calls = []
+
+    def chat(self, messages, tools=None, extra_body=None, timeout=None):
+        import json as _json
+
+        self.calls.append(
+            {
+                "messages": messages,
+                "tools": tools,
+                "extra_body": extra_body,
+                "timeout": timeout,
+            }
+        )
+        payload = self.payloads.pop(0) if self.payloads else {}
+        content = payload if isinstance(payload, str) else _json.dumps(payload, ensure_ascii=False)
+        return {"content": content, "tool_calls": []}
+
+
+@pytest.fixture
+def fake_clock():
+    """工厂：``clock = fake_clock(1764000000.0)``，可 ``clock.advance(60)``。"""
+
+    def _make(ts: float = 0.0) -> FakeClock:
+        return FakeClock(ts)
+
+    return _make
+
+
+@pytest.fixture
+def fake_provider():
+    """工厂：``provider = fake_provider({"items": [...]}, configured=True)``。"""
+
+    def _make(*payloads, configured: bool = True) -> FakeProvider:
+        return FakeProvider(payloads, configured=configured)
+
+    return _make
+

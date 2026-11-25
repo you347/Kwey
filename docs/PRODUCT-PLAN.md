@@ -145,6 +145,7 @@
    - 六类问题加权扣分 → 0~100 分；三种一键修复（空笔记进回收站 / 断链降级 / 批量补标签）
    - 捕获只问内容，整理延后：AI 给标题/目录/标签建议，人勾选后批量应用
 6. ✅ **MCP 工具矩阵 23 → 28**：新增 `kwey.views.list` / `kwey.views.query` / `kwey.views.save` / `kwey.diagnose` / `kwey.capture`
+7. ✅ **跨 Agent 会话蒸馏（C 第一批）**：`kwey.session.distill`（28 → 29，write）把标准会话输入提取为决策/约束/证伪/未完成/知识候选/遗漏待审草案；每条事实带 `source_event_ids`，幂等返回 `draft_id`，不写普通笔记、不自动批准。CLI 增加 `session distill --stdin --preview --json` 离线预览（无 draft_id、不入队）。原始 Claude Code hook 适配未实测，当前只收标准输入。
 
 **下一轮候选**（未排期）：PWA 只读 + 移动端捕获；流式导入进度（WS）；视图关系列（rollup/relation，对齐 Notion）。
 

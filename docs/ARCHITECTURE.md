@@ -183,10 +183,21 @@ created: 2026-11-12T10:00:00   # ISO 8601，创建时由 VaultService 自动补
 updated: 2026-11-12T12:30:00   # 保存时自动刷新
 aliases: []               # 预留（M3 图谱/切换器增强），M1 解析但不特殊处理
 <任意自定义字段>            # 原样保留写回，不丢不排序
+# ---- 写入溯源管理字段（kwey_ 命名空间，宿主生成，普通 UI 只读）----
+kwey_writer_kind: human   # human / agent / system / unknown；不信任模型自报值
+kwey_last_writer: local-ui # local-ui / kwey-built-in / mcp-stdio / token 名 / duty:inbox
+kwey_run_id: chat:1a2b3c  # 可选批次；未提供则不写，不制造假关联
+kwey_generated: false     # 当前语义版本含 Agent 派生内容（具粘性）
+kwey_reviewed_at: 2026-11-25T10:00:00+08:00  # 仅单独审阅动作设置
+kwey_reviewed_hash: <sha256>  # 人工确认时的 payload hash
+kwey_hash_version: 1      # payload 序列化规则版本；版本不符一律不算已审
 ---
 ```
 
 - 写回策略：只替换被编辑的字段，YAML 序列化后重新拼接，正文与注释性内容不动（`python-frontmatter` 天然满足）。
+- `kwey_*` 由 VaultService 统一写路径自动注入/刷新；payload hash = 正文 + 业务 frontmatter（排除 `created`/`updated` 与全部 `kwey_*`）的稳定序列化 SHA-256。
+  序列化规则变化必须升 `kwey_hash_version`，旧版本 hash 不得被误判为当前已审。
+- 管理字段只是可携带声明：是否「已审当前版本」必须以本机 `.kwey/provenance.json` 基线核对为准；无基线时状态为 `unknown`（声明未校验）。
 
 ### 3.4 事件类型枚举（`events.py`，与 DESIGN.md 推送格式对齐）
 

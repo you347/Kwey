@@ -21,6 +21,9 @@ demo-vault/
 
 # 测试/验收临时产物
 tests/.tmp/
+.screenshots/
+.trae-html-share-packages/
+.pytest-tmp*/
 
 # .workbuddy 只保留项目记忆，探测脚本/临时 vault 不入库
 .workbuddy/*
