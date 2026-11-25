@@ -14,6 +14,26 @@ let asking = false;
 
 const EMPTY_HINT = '<div class="panel-empty">输入问题，从你的知识库找答案；引用可点击直达笔记。</div>';
 
+// P2-D：来源列表明确标注失效与替代，不把 expired/superseded 混作当前事实。
+const FRESH_LABEL = {
+  not_yet_effective_declared: '尚未生效',
+  expired_declared: '已过期',
+  superseded_declared: '已被替代',
+  invalid_metadata: '元数据有误',
+};
+
+function sourceBadge(s) {
+  const state = s.freshness && s.freshness.state;
+  const parts = [];
+  if (FRESH_LABEL[state]) parts.push(FRESH_LABEL[state]);
+  if (s.replacement_for) parts.push('替代证据');
+  if (!parts.length) return '';
+  const hint = s.freshness && s.freshness.superseded_by
+    ? ` title="${escapeHtml(`替代：${s.freshness.superseded_by}`)}"`
+    : '';
+  return ` <span class="rag-fresh"${hint}>${escapeHtml(parts.join(' · '))}</span>`;
+}
+
 export function initRag() {
   if (initialized) return;
   initialized = true;
@@ -82,7 +102,7 @@ function renderHistory() {
         <div class="rag-turn__badge ${h.used_provider ? 'rag-turn__badge--ai' : ''}">${h.used_provider ? 'AI 生成' : '检索摘录'}</div>
         <div class="rag-turn__text">${renderAnswer(h.answer, h.hallucinated || [])}</div>
         ${(h.hallucinated || []).length ? `<div class="rag-turn__warn">已剔除 ${h.hallucinated.length} 条无依据引用</div>` : ''}
-        ${h.sources?.length ? `<details class="rag-turn__sources"><summary>${h.sources.length} 条来源</summary><ul>${h.sources.map((s) => `<li><button class="rag-cite" data-path="${escapeHtml(s.path)}">${escapeHtml(s.title || s.path)}</button></li>`).join('')}</ul></details>` : ''}
+        ${h.sources?.length ? `<details class="rag-turn__sources"><summary>${h.sources.length} 条来源</summary><ul>${h.sources.map((s) => `<li><button class="rag-cite" data-path="${escapeHtml(s.path)}">${escapeHtml(s.title || s.path)}</button>${sourceBadge(s)}</li>`).join('')}</ul></details>` : ''}
       </div>
     </div>`).join('');
 

@@ -14,6 +14,11 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Query
 
 from app.api import deps
+from app.freshness import (
+    downweight_enabled,
+    parse_as_of_param,
+    rerank,
+)
 from app.index.database import IndexDatabase, cjk_space
 from app.index.vector import build_vector_index
 from app.paths import normalize_rel
@@ -229,19 +234,49 @@ async def search(
     q: str = Query(default="", description="支持 path:/tag:/file: 操作符"),
     limit: int = Query(default=50, ge=1, le=200),
     mode: str = Query(default="fts", description="fts（默认）；hybrid = FTS5+向量+链接图，向量不可用时自动降级"),
+    as_of: Optional[str] = Query(
+        default=None,
+        description="按该时点评估有效期（ISO 日期/时间）；缺省为当前。历史期间查询不会被今天的状态压低",
+    ),
 ):
     if mode not in ("fts", "hybrid"):
         raise HTTPException(status_code=400, detail="mode 仅支持 fts / hybrid")
     db = deps.require_db()
     parsed = parse_query(q)
     match_terms = build_match_terms(parsed["terms"])  # type: ignore[arg-type]
+    try:
+        as_of_dt = parse_as_of_param(as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # P2-D：默认当前事实查询降权；关闭降权后仍按 as_of 返回状态元数据。
+    downweight = downweight_enabled(deps.get_config())
+    need_freshness = downweight or as_of_dt is not None
+    cand_limit = min(max(limit * 3, 60), 200) if need_freshness else limit
 
     started = time.perf_counter()
     vector_info: Optional[Dict] = None
     if mode == "hybrid":
-        hits, total, vector_info = _hybrid_search(db, parsed, match_terms, limit)
+        hits, total, vector_info = _hybrid_search(db, parsed, match_terms, cand_limit)
     else:
-        hits, total = _fts_search(db, parsed, match_terms, limit)
+        hits, total = _fts_search(db, parsed, match_terms, cand_limit)
+    freshness_info: Optional[Dict] = None
+    if need_freshness and hits:
+        # 候选融合之后、最终截断之前重排；替代证据可能在截断前补入。
+        hits, freshness_info = rerank(
+            hits,
+            db,
+            as_of=as_of_dt,
+            downweight=downweight,
+            historical=as_of_dt is not None,
+            make_entry=lambda path, score: {
+                "path": path,
+                "title": (db.get_note(path) or {}).get("title") or path,
+                "score": score,
+                "snippet": "",
+                "tags": db.tags_of_note(path),
+            },
+        )
+        hits = hits[:limit]
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
 
     data: Dict = {
@@ -252,6 +287,8 @@ async def search(
     }
     if vector_info is not None:
         data["vector"] = vector_info
+    if freshness_info is not None:
+        data["freshness"] = freshness_info
     return {"code": 0, "data": data, "message": "ok"}
 
 

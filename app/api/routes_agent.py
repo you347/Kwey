@@ -140,11 +140,15 @@ async def agent_search(
     q: str = Query(default="", description="支持 path:/tag:/file: 操作符"),
     limit: int = Query(default=50, ge=1, le=200),
     mode: str = Query(default="fts", description="fts（默认 BM25）；hybrid = FTS+向量+链接图 RRF 融合，向量不可用时降级纯 FTS"),
+    as_of: Optional[str] = Query(default=None, description="按该时点评估有效期；缺省为当前"),
 ):
     _auth(request, "read")
     started = time.perf_counter()
+    args: Dict[str, Any] = {"query": q, "limit": limit, "mode": mode}
+    if as_of is not None:
+        args["as_of"] = as_of
     try:
-        data = _invoke("kwey.search", {"query": q, "limit": limit, "mode": mode})
+        data = _invoke("kwey.search", args)
     except HTTPException:
         raise
     except Exception as exc:  # 兜底：漏网的 FTS5 语法错误不应 500
@@ -157,9 +161,13 @@ async def agent_search(
 async def agent_get_note(
     request: Request,
     path: str = Query(..., description="vault 相对正斜杠路径"),
+    as_of: Optional[str] = Query(default=None, description="按该时点评估有效期；缺省为当前"),
 ):
     _auth(request, "read")
-    return _ok(_invoke("kwey.read", {"path": path}))
+    args: Dict[str, Any] = {"path": path}
+    if as_of is not None:
+        args["as_of"] = as_of
+    return _ok(_invoke("kwey.read", args))
 
 
 # ---------------------------------------------------------------- write 端点

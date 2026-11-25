@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.agent.provider import AgentProvider, ProviderError
 from app.api import deps
+from app.freshness import parse_as_of_param
 from app.index.context import build_context
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
@@ -47,12 +48,14 @@ _ANSWER_SYSTEM = (
 class RagAskRequest(BaseModel):
     question: str
     max_chars: Optional[int] = None
+    # P2-D：缺省为当前事实；显式历史时点按 as_of 评估有效期，不按今天压低。
+    as_of: Optional[str] = None
 
 
-def _enrich_sources(vault, raw_sources: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _enrich_sources(vault, raw_sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """sources 补 title（build_context 只给 path/score/reason），保留可溯源字段。"""
     db = getattr(vault, "db", None)
-    out: List[Dict[str, str]] = []
+    out: List[Dict[str, Any]] = []
     for s in raw_sources:
         path = str(s.get("path") or "")
         if not path:
@@ -65,11 +68,16 @@ def _enrich_sources(vault, raw_sources: List[Dict[str, Any]]) -> List[Dict[str, 
                     title = str(note["title"])
             except Exception:  # noqa: BLE001 —— 标题取不到用文件名兜底
                 pass
-        out.append({
+        item: Dict[str, Any] = {
             "path": path,
             "title": title,
             "reason": str(s.get("reason") or ""),
-        })
+        }
+        if s.get("freshness"):
+            item["freshness"] = s["freshness"]
+        if s.get("replacement_for"):
+            item["replacement_for"] = str(s["replacement_for"])
+        out.append(item)
     return out
 
 
@@ -150,7 +158,11 @@ async def rag_ask(req: RagAskRequest):
         )
 
     vault = deps.require_vault()
-    ctx = build_context(vault, question, max_chars=max_chars)
+    try:
+        as_of = parse_as_of_param(req.as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ctx = build_context(vault, question, max_chars=max_chars, as_of=as_of)
     sources = _enrich_sources(vault, ctx.get("sources") or [])
 
     used_provider = False
@@ -176,6 +188,7 @@ async def rag_ask(req: RagAskRequest):
             "used_provider": used_provider,
             "hallucinated": hallucinated,
             "question": question,
+            "freshness": ctx.get("freshness") or {},
         },
         "message": "ok",
     }

@@ -58,6 +58,8 @@ class AppSettings:
         "update": {"check_on_start": True, "platform": "gitee", "repo": "ye-jun-hao55/kwey"},
         # ---- 知识体检 ----
         "diagnose": {"stale_days": 90, "duplicate_ratio": 0.92, "exclude": []},
+        # ---- P2-D 知识保鲜：当前事实查询降权开关（可一键关闭） ----
+        "freshness": {"downweight": True},
         # ---- 快速捕获 / AI 收件箱 ----
         "inbox": {"dir": "inbox"},
     }
@@ -123,6 +125,10 @@ class AppSettings:
                     merged = dict(self._data["vector"])
                     merged.update(value)
                     self._data["vector"] = merged
+                elif key == "freshness" and isinstance(value, dict) and isinstance(self._data.get("freshness"), dict):
+                    merged = dict(self._data["freshness"])
+                    merged.update(value)
+                    self._data["freshness"] = merged
                 elif key == "fonts" and isinstance(value, dict) and isinstance(self._data.get("fonts"), dict):
                     merged = dict(self._data["fonts"])
                     merged.update(value)

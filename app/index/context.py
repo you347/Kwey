@@ -19,6 +19,7 @@ import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.api.routes_search import build_match_terms, parse_query
+from app.freshness import downweight_enabled, rerank
 from app.index.database import IndexDatabase
 
 _CJK_WORD_RE = re.compile(r"[\u4e00-\u9fff]+|[A-Za-z0-9_]+")
@@ -115,10 +116,13 @@ def _rank(
     focus_path: Optional[str],
     depth: int,
     limit: int,
-) -> List[Dict[str, Any]]:
-    """融合 FTS / 向量 / 图扩展 / focus 四路信号，返回有序候选。"""
+    *,
+    as_of: Any = None,
+    downweight: bool = True,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """融合 FTS / 向量 / 图扩展 / focus 四路信号，返回有序候选与新鲜度概览。"""
     parsed, terms = _extract_terms(query)
-    cand_n = min(max(limit * 3, 60), 200)
+    cand_n = min(max(limit * 3, 60), 200) if (downweight or as_of is not None) else limit
     fts = _fts_hits(db, parsed, terms, cand_n)
     vec = _vector_hits(vault, query, cand_n) if terms else []
 
@@ -148,14 +152,25 @@ def _rank(
         reasons[focus_path].add("focus")
 
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    out: List[Dict[str, Any]] = []
-    for path, score in ranked[:limit]:
-        out.append({
+    out: List[Dict[str, Any]] = [
+        {
             "path": path,
             "score": round(score, 6),
             "reason": "|".join(sorted(reasons.get(path, set()))) or "graph",
-        })
-    return out
+        }
+        for path, score in ranked
+    ]
+    freshness: Dict[str, Any] = {}
+    if out and (downweight or as_of is not None):
+        # 与 kwey.search / REST 搜索同一口径：融合后、截断前重排。
+        out, freshness = rerank(
+            out,
+            db,
+            as_of=as_of,
+            downweight=downweight,
+            historical=as_of is not None,
+        )
+    return out[:limit], freshness
 
 
 def select_files(vault: Any, query: str, limit: int = 30) -> List[Dict[str, Any]]:
@@ -163,7 +178,10 @@ def select_files(vault: Any, query: str, limit: int = 30) -> List[Dict[str, Any]
     db = getattr(vault, "db", None)
     if db is None:
         return []
-    return _rank(db, vault, query, None, depth=2, limit=max(1, int(limit)))
+    ranked, _freshness = _rank(
+        db, vault, query, None, depth=2, limit=max(1, int(limit))
+    )
+    return ranked
 
 
 def _master_index(
@@ -222,16 +240,22 @@ def build_context(
     max_chars: int = 12000,
     focus_path: Optional[str] = None,
     depth: int = 1,
+    *,
+    as_of: Any = None,
+    downweight: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """组装可塞进 Agent 上下文的文本；返回 {text, sources}。
+    """组装可塞进 Agent 上下文的文本；返回 {text, sources, freshness}。
 
     text 严格 <= max_chars；sources 中每个 path 都在 text 中以「[来源: path]」标注，
-    便于 A6 编译层 / A7 记忆层引用与回溯。
+    便于 A6 编译层 / A7 记忆层引用与回溯。``as_of`` 缺省为当前；历史期间查询
+    按该时点评估有效期，不按今天压低当时正确的证据。
     """
     budget = max(0, int(max_chars))
     db = getattr(vault, "db", None)
     if db is None:
         return {"text": "", "sources": []}
+    if downweight is None:
+        downweight = downweight_enabled(getattr(vault, "config", None))
     graph = _graph_of(vault)
     _, terms = _extract_terms(query)
 
@@ -241,7 +265,16 @@ def build_context(
     used = len(index_text)
 
     sources: List[Dict[str, Any]] = []
-    candidates = _rank(db, vault, query, focus_path, depth, limit=max(20, budget // 300))
+    candidates, freshness = _rank(
+        db,
+        vault,
+        query,
+        focus_path,
+        depth,
+        limit=max(20, budget // 300),
+        as_of=as_of,
+        downweight=downweight,
+    )
     for cand in candidates:
         if used >= budget:
             break
@@ -252,21 +285,39 @@ def build_context(
             continue
         body = str(doc.get("content") or "")
         title = str(doc.get("title") or path)
+        freshness_info = cand.get("freshness")
         snippet_limit = min(_SNIPPET_LINE_LIMIT, budget - used)
         snippet = _best_snippet(body, terms, snippet_limit)
         if not snippet:
             continue
-        block = f"\n\n## {title} ({path})\n{snippet}\n[来源: {path}]"
+        state_note = ""
+        if freshness_info:
+            state_note = f"\n[新鲜度: {freshness_info.get('state')}"
+            target = freshness_info.get("superseded_by")
+            if target:
+                state_note += f"；替代: {target}"
+            state_note += "]"
+        block = (
+            f"\n\n## {title} ({path})\n{snippet}{state_note}\n[来源: {path}]"
+        )
         room = budget - used
         if len(block) > room:
             block = block[:room]
         parts.append(block)
         used += len(block)
-        sources.append({
+        source = {
             "path": path,
             "score": cand["score"],
             "reason": cand["reason"],
-        })
+        }
+        if freshness_info:
+            source["freshness"] = freshness_info
+        if cand.get("replacement_for"):
+            source["replacement_for"] = cand["replacement_for"]
+        sources.append(source)
 
     text = "".join(parts)[:budget]
-    return {"text": text, "sources": sources}
+    result: Dict[str, Any] = {"text": text, "sources": sources}
+    if freshness:
+        result["freshness"] = freshness  # 可选；旧调用方忽略新增字段
+    return result

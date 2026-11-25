@@ -102,6 +102,7 @@ class SettingsUpdateRequest(BaseModel):
     agent: Optional[Dict[str, Any]] = None
     snapshots: Optional[Dict[str, Any]] = None
     vector: Optional[Dict[str, Any]] = None  # A2：enabled/model/weight/graph_weight/rrf_k
+    freshness: Optional[Dict[str, Any]] = None  # P2-D：downweight 开关
     fonts: Optional[Dict[str, Any]] = None   # 字号：ui/sidebar/editor/chat（px，前端注入 CSS 变量）
     # ---- P1 前端功能配置 ----
     template_dir: Optional[str] = None
