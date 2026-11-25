@@ -116,6 +116,7 @@
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
     <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></symbol>
     <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+    <symbol id="i-duty" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></symbol>
   </svg>
 
   <!-- ======================= 标题栏 ======================= -->
@@ -136,29 +137,31 @@
     <!-- 左侧 ribbon：图标导航（Obsidian 式） -->
     <nav id="ribbon" class="ribbon" aria-label="面板导航">
       <div class="ribbon__group">
-        <button class="ribbon__btn" data-side="left" data-panel="files" title="文件"><svg class="icon"><use href="#i-folder"/></svg></button>
-        <button id="btn-capture" class="ribbon__btn" title="快速捕获（Ctrl+Shift+Space）"><svg class="icon"><use href="#i-plus"/></svg></button>
-        <button id="btn-inbox" class="ribbon__btn" title="AI 收件箱：批量整理捕获的内容"><svg class="icon"><use href="#i-folder-open"/></svg></button>
-        <button id="btn-bases" class="ribbon__btn" title="视图（Bases）：把属性变成表格/卡片"><svg class="icon"><use href="#i-columns"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="search" title="搜索"><svg class="icon"><use href="#i-search"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="tags" title="标签"><svg class="icon"><use href="#i-tag"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="bookmarks" title="书签"><svg class="icon"><use href="#i-bookmark"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="recent" title="最近文件"><svg class="icon"><use href="#i-clock"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="outline" title="大纲"><svg class="icon"><use href="#i-list"/></svg></button>
-        <button id="btn-diagnose" class="ribbon__btn" title="知识体检：孤立/断链/重复"><svg class="icon"><use href="#i-sliders"/></svg></button>
-        <button class="ribbon__btn" data-side="left" data-panel="trash" title="回收站"><svg class="icon"><use href="#i-trash"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="files" data-tip="笔记" aria-label="笔记"><svg class="icon"><use href="#i-folder"/></svg></button>
+        <button id="btn-capture" class="ribbon__btn" data-tip="捕获" aria-label="快速捕获（Ctrl+Shift+Space）"><svg class="icon"><use href="#i-plus"/></svg></button>
+        <button id="btn-inbox" class="ribbon__btn" data-tip="收件箱" aria-label="AI 收件箱：批量整理捕获的内容"><svg class="icon"><use href="#i-folder-open"/></svg></button>
+        <button id="btn-duty" class="ribbon__btn" data-tip="值班" aria-label="值班：职责 / 待审 / 运行记录"><svg class="icon"><use href="#i-duty"/></svg></button>
+        <button id="btn-bases" class="ribbon__btn" data-tip="视图" aria-label="视图（Bases）：把属性变成表格/卡片"><svg class="icon"><use href="#i-columns"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="search" data-tip="搜索" aria-label="搜索"><svg class="icon"><use href="#i-search"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="tags" data-tip="标签" aria-label="标签"><svg class="icon"><use href="#i-tag"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="bookmarks" data-tip="书签" aria-label="书签"><svg class="icon"><use href="#i-bookmark"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="recent" data-tip="最近" aria-label="最近文件"><svg class="icon"><use href="#i-clock"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="outline" data-tip="大纲" aria-label="大纲"><svg class="icon"><use href="#i-list"/></svg></button>
+        <button id="btn-diagnose" class="ribbon__btn" data-tip="体检" aria-label="知识体检：孤立/断链/重复"><svg class="icon"><use href="#i-sliders"/></svg></button>
+        <button class="ribbon__btn" data-side="left" data-panel="trash" data-tip="回收站" aria-label="回收站"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
       <div class="ribbon__spacer"></div>
       <div class="ribbon__group ribbon__group--right">
-        <button class="ribbon__btn" data-side="right" data-panel="backlinks" title="反向链接"><svg class="icon"><use href="#i-link"/></svg></button>
-        <button class="ribbon__btn" data-side="right" data-panel="graph" title="本地图谱"><svg class="icon"><use href="#i-graph"/></svg></button>
-        <button class="ribbon__btn" data-side="right" data-panel="chat" title="内置智能体"><svg class="icon"><use href="#i-spark"/></svg></button>
+        <button class="ribbon__btn" data-side="right" data-panel="backlinks" data-tip="反链" aria-label="反向链接"><svg class="icon"><use href="#i-link"/></svg></button>
+        <button class="ribbon__btn" data-side="right" data-panel="graph" data-tip="图谱" aria-label="本地图谱"><svg class="icon"><use href="#i-graph"/></svg></button>
+        <button class="ribbon__btn" data-side="right" data-panel="chat" data-tip="助手" aria-label="内置智能体"><svg class="icon"><use href="#i-spark"/></svg></button>
       </div>
       <div class="ribbon__group ribbon__group--bottom">
-        <button id="sidebar-collapse" class="ribbon__btn" title="折叠/展开左栏"><svg class="icon"><use href="#i-panel-left"/></svg></button>
-        <button id="rightbar-collapse" class="ribbon__btn" title="折叠/展开右栏"><svg class="icon"><use href="#i-panel-right"/></svg></button>
+        <button id="sidebar-collapse" class="ribbon__btn" data-tip="左栏" aria-label="折叠/展开左栏"><svg class="icon"><use href="#i-panel-left"/></svg></button>
+        <button id="rightbar-collapse" class="ribbon__btn" data-tip="右栏" aria-label="折叠/展开右栏"><svg class="icon"><use href="#i-panel-right"/></svg></button>
       </div>
     </nav>
+    <div id="ribbon-tip" class="ribbon-tip" role="tooltip" aria-hidden="true"></div>
 
     <!-- 左侧边栏：多 tab 面板 -->
     <aside id="sidebar" class="sidebar">
@@ -176,6 +179,8 @@
           <div class="sidebar__header">
             <span>文件</span>
             <span class="sidebar__header-actions">
+              <button id="btn-unreviewed-filter" class="btn btn--mini" type="button"
+                aria-pressed="false" title="只看 Agent 改写且尚未审阅的笔记">未审</button>
               <button id="btn-new-note" class="btn btn--mini" title="新建笔记">
                 <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> 笔记
               </button>
@@ -245,7 +250,18 @@
               <svg class="icon" aria-hidden="true"><use href="#i-columns"/></svg> 双屏
             </button>
           </div>
-          <span id="save-state" class="save-state"></span>
+          <span class="editor-toolbar__right">
+            <button id="provenance-badge" class="prov-badge hidden" type="button"
+              aria-haspopup="dialog" aria-expanded="false" aria-label="写入来源与审阅状态">
+              <span class="prov-badge__dot" aria-hidden="true"></span>
+              <span id="provenance-badge-label">来源未知</span>
+            </button>
+            <button id="freshness-badge" class="fresh-badge hidden" type="button"
+              aria-haspopup="dialog" aria-expanded="false" aria-label="知识保鲜状态">
+              <span id="freshness-badge-label">有效期</span>
+            </button>
+            <span id="save-state" class="save-state"></span>
+          </span>
         </div>
         <h1 id="note-title" class="note-title"></h1>
         <div id="properties" class="properties"></div>
@@ -547,6 +563,24 @@
       <aside id="settings-nav"></aside>
       <div id="settings-panel" role="tabpanel" aria-labelledby="settings-group-title"></div>
     </div>
+  </div>
+
+  <!-- ======================= 浮层：写入来源 / 审阅 ======================= -->
+  <div id="provenance-pop" class="prov-pop hidden" role="dialog" aria-label="写入来源与审阅">
+    <div class="prov-pop__head">
+      <strong>写入来源</strong>
+      <button id="provenance-close" class="btn btn--mini btn--ghost" type="button" aria-label="关闭">关闭</button>
+    </div>
+    <div id="provenance-body" class="prov-pop__body"></div>
+  </div>
+
+  <!-- ======================= 浮层：知识保鲜 / 失效语义 ======================= -->
+  <div id="freshness-pop" class="fresh-pop hidden" role="dialog" aria-label="知识保鲜与失效">
+    <div class="prov-pop__head">
+      <strong>知识保鲜</strong>
+      <button id="freshness-close" class="btn btn--mini btn--ghost" type="button" aria-label="关闭">关闭</button>
+    </div>
+    <div id="freshness-body" class="prov-pop__body"></div>
   </div>
 
   <div id="toasts" class="toasts"></div>

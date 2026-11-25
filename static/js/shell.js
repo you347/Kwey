@@ -40,6 +40,7 @@ export function initShell() {
   bindResizer($('#left-resizer'), 'left');
   bindResizer($('#right-resizer'), 'right');
   bindPanelSearch();
+  initRibbonTips();
 
   applyWidths(readWidths());
   activatePanel('left', active.left, false);
@@ -55,6 +56,82 @@ export function onVaultReady() {
   });
   activatePanel('left', LEFT_PANELS.includes(s.left_panel) ? s.left_panel : active.left, false);
   activatePanel('right', RIGHT_PANELS.includes(s.right_panel) ? s.right_panel : active.right, false);
+}
+
+/* ------------------------------------------------------------------ ribbon 短标签 */
+/** 悬浮/键盘聚焦时显示按钮的 data-tip 短名称；点击行为不变。 */
+function initRibbonTips() {
+  const ribbon = $('#ribbon');
+  const tip = $('#ribbon-tip');
+  if (!ribbon || !tip) return;
+
+  let showTimer = null;
+  let currentBtn = null;
+
+  const hide = () => {
+    clearTimeout(showTimer);
+    showTimer = null;
+    currentBtn = null;
+    tip.classList.remove('is-visible');
+    tip.setAttribute('aria-hidden', 'true');
+  };
+
+  const place = (btn) => {
+    const rect = btn.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const pad = 8;
+    let left = rect.right + pad;
+    let top = rect.top + (rect.height - box.height) / 2;
+    if (left + box.width > window.innerWidth - pad) {
+      left = rect.left - box.width - pad;
+    }
+    left = Math.max(pad, Math.min(left, window.innerWidth - box.width - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - box.height - pad));
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  };
+
+  const show = (btn) => {
+    if (!btn) return;
+    currentBtn = btn;
+    clearTimeout(showTimer);
+    showTimer = setTimeout(() => {
+      if (currentBtn !== btn) return;
+      const label = btn.dataset.tip || btn.getAttribute('aria-label') || '';
+      if (!label) return;
+      tip.textContent = label;
+      tip.style.visibility = 'hidden';
+      tip.classList.add('is-visible');
+      place(btn);
+      tip.style.visibility = '';
+      tip.setAttribute('aria-hidden', 'false');
+    }, 90);
+  };
+
+  ribbon.addEventListener('pointerover', (e) => {
+    const btn = e.target.closest('.ribbon__btn');
+    if (!btn) return;
+    if (e.relatedTarget && btn.contains(e.relatedTarget)) return;
+    show(btn);
+  });
+  ribbon.addEventListener('pointerout', (e) => {
+    const btn = e.target.closest('.ribbon__btn');
+    if (!btn) return;
+    if (e.relatedTarget && btn.contains(e.relatedTarget)) return;
+    if (currentBtn === btn) hide();
+  });
+  ribbon.addEventListener('pointerdown', hide, true);
+  ribbon.addEventListener('focusin', (e) => {
+    const btn = e.target.closest('.ribbon__btn');
+    // 鼠标点击后的聚焦不弹标签；键盘 Tab 进入时 :focus-visible 生效。
+    if (btn && (!btn.matches || btn.matches(':focus-visible'))) show(btn);
+  });
+  ribbon.addEventListener('focusout', (e) => {
+    const btn = e.target.closest('.ribbon__btn');
+    if (btn && currentBtn === btn) hide();
+  });
+  window.addEventListener('blur', hide);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
 }
 
 /* ------------------------------------------------------------------ 面板切换 */

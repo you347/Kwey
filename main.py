@@ -142,7 +142,12 @@ def run_server_mode(app, port: int, open_browser: bool) -> None:
 
 
 class KweyBridge:
-    """pywebview js_api 桥：前端经 window.pywebview.api.pick_folder() 调用。"""
+    """pywebview js_api 桥：前端经 window.pywebview.api.* 调用。
+
+    桌面原生审批桥：值班提案的 approve 必须由用户在本机原生确认框确认后，
+    才签发绑定 proposal 版本 / 哈希 / vault generation 的一次性 grant（60 秒、
+    仅可消费一次）。纯 ``--server`` 模式不加载 pywebview，因此没有签发入口。
+    """
 
     def pick_folder(self):
         """弹出系统文件夹选择框，返回所选绝对路径；取消返回 None。"""
@@ -156,6 +161,85 @@ class KweyBridge:
         if result:
             return result[0]
         return None
+
+    def duty_approval_grant(self, ctx=None):
+        """原生确认后签发一次性审批凭据；不可用/取消返回 None。"""
+        from app.api import deps
+
+        context = ctx if isinstance(ctx, dict) else {}
+        proposal_id = str(context.get("proposal_id") or "")
+        if not proposal_id:
+            return None
+        supervisor = deps.get_duty_supervisor()
+        if supervisor is None:
+            return None
+        info = supervisor.grant_context(proposal_id)
+        if info is None:
+            return None
+        # 前端传来的版本 / 哈希必须与当前待审提案一致，防止旧详情页误批。
+        if context.get("version") is not None and int(context["version"]) != info["version"]:
+            return None
+        if context.get("proposal_hash") and str(context["proposal_hash"]) != info["proposal_hash"]:
+            return None
+
+        import webview
+
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return None
+        lines = ["将应用以下改动（仅此提案版本）：", ""]
+        for action in info.get("actions", [])[:10]:
+            target = action.get("target") or ""
+            lines.append(
+                f"· {action.get('action') or '修改'} {action.get('path') or ''}"
+                + (f" → {target}" if target else "")
+            )
+        lines.append("")
+        lines.append(f"提案 {info['proposal_id']}（v{info['version']}）")
+        try:
+            confirmed = window.create_confirmation_dialog("Kwey 值班审批", "\n".join(lines))
+        except Exception:  # noqa: BLE001 —— 原生对话框不可用时不签发
+            return None
+        if not confirmed:
+            return None
+        return supervisor.issue_grant(proposal_id)
+
+    def session_approval_grant(self, ctx=None):
+        """会话蒸馏草案的原生确认桥；与值班提案共用同一一次性 grant 表。"""
+        from app.api import deps
+
+        context = ctx if isinstance(ctx, dict) else {}
+        draft_id = str(context.get("draft_id") or "")
+        if not draft_id:
+            return None
+        supervisor = deps.get_duty_supervisor()
+        if supervisor is None:
+            return None
+        info = supervisor.session_grant_context(draft_id)
+        if info is None:
+            return None
+        if context.get("version") is not None and int(context["version"]) != info["version"]:
+            return None
+        if context.get("build_hash") and str(context["build_hash"]) != info["proposal_hash"]:
+            return None
+
+        import webview
+
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return None
+        lines = ["将创建以下笔记（仅此草案版本）：", ""]
+        for action in info.get("actions", [])[:10]:
+            lines.append(f"· {action.get('action') or '创建'} {action.get('path') or ''}")
+        lines.append("")
+        lines.append(f"草案 {info['draft_id']}（v{info['version']}）")
+        try:
+            confirmed = window.create_confirmation_dialog("Kwey 会话蒸馏审批", "\n".join(lines))
+        except Exception:  # noqa: BLE001 —— 原生对话框不可用时不签发
+            return None
+        if not confirmed:
+            return None
+        return supervisor.issue_session_grant(draft_id)
 
 
 def _browse_forever(url: str) -> None:
@@ -334,11 +418,13 @@ def _run(argv=None) -> int:
             # 已有实例：不重复起服务，把地址告诉用户即可
             print(f"[kwey] 已有 Kwey 实例在运行: http://127.0.0.1:{port}")
             return 0
-        app = create_app(initial_vault=args.vault, start_watcher=True)
+        app = create_app(initial_vault=args.vault, start_watcher=True, desktop=False)
         run_server_mode(app, port, open_browser=not args.no_browser)
         return 0
 
-    app = None if reuse else create_app(initial_vault=args.vault, start_watcher=True)
+    app = None if reuse else create_app(
+        initial_vault=args.vault, start_watcher=True, desktop=True
+    )
     run_desktop_mode(app, port, reuse=reuse)
     return 0
 

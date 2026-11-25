@@ -49,6 +49,9 @@ import { initUpdate } from './update.js';
 import { initDiagnose } from './diagnose.js';
 import { initCapture, openCapture } from './capture.js';
 import { initInbox } from './inbox.js';
+import { initDuty } from './duty.js';
+import * as provenance from './provenance.js';
+import * as freshness from './freshness.js';
 
 let autosaveRunner = null;
 let wsClosed = null;
@@ -61,6 +64,8 @@ let conflictBusy = false;
 /* ------------------------------------------------------------------ 启动 */
 async function bootstrap() {
   shell.initShell();
+  provenance.initProvenance();
+  freshness.initFreshness();
   bindStaticButtons();
   registerCommands();
   bindGlobalKeys();
@@ -154,6 +159,11 @@ async function startVaultUI() {
       if (path !== state.activePath) return;
       refreshPreview();
       backlinks.refreshBacklinks(path);
+      freshness.refresh(path).catch(() => {});
+    });
+    // 审阅只改管理字段，但确实写盘；吞掉紧随其后的 updated 事件，避免重载编辑器丢光标。
+    on('provenance-reviewed', ({ path }) => {
+      if (path) lastLocalWrite = { path, ts: Date.now() };
     });
   }
   // 标签过滤由 tagpanel.js 自行展示笔记列表，无需额外处理
@@ -185,6 +195,7 @@ async function startVaultUI() {
   initDiagnose();
   initCapture();
   initInbox();
+  initDuty();
   initPulse();
   hotkeys.refresh();
   shell.onVaultReady();
@@ -298,6 +309,8 @@ async function loadNote(path) {
     updateWordCount();
     editor.focus();
     hideConflict();
+    provenance.refresh(path).catch(() => {});
+    freshness.refresh(path).catch(() => {});
   } catch (err) {
     if (err.code === 404) {
       toast(`笔记不存在: ${path}（已从标签页移除）`, 'error');
@@ -320,6 +333,8 @@ function showNoNote() {
   preview.clearPreview();
   properties.clearProperties();
   backlinks.refreshBacklinks(null);
+  provenance.clear();
+  freshness.clear();
   updateWordCount();
 }
 
@@ -398,6 +413,9 @@ async function saveNote(manual) {
     }, 800);
     tabs.setDirty(false);
     hideConflict();
+    provenance.invalidate(state.doc.path);
+    provenance.refresh(state.doc.path).catch(() => {});
+    freshness.refresh(state.doc.path).catch(() => {});
     setSaveState(result.links_changed ? '已保存（链接已更新）' : '已保存');
     if (result.links_changed) backlinks.refreshBacklinks(state.doc.path);
     if (manual) toast('已保存', 'success', 1500);
@@ -429,6 +447,9 @@ async function saveFrontmatter(newFm) {
     const title = newFm.title || state.doc.path.split('/').pop().replace(/\.(md|markdown)$/i, '');
     $('#note-title').textContent = title;
     tabs.refreshTabTitle(state.doc.path, title);
+    provenance.invalidate(state.doc.path);
+    provenance.refresh(state.doc.path).catch(() => {});
+    freshness.refresh(state.doc.path).catch(() => {});
     emit('tree-refresh');
   } catch (err) { reportError(err); }
 }
@@ -506,6 +527,10 @@ function handleWsEvent(msg) {
       if (oldPath) tabs.renameTab(oldPath, path);
       break;
     case 'updated':
+      if (path === state.activePath) {
+        provenance.invalidate(path);
+        provenance.refresh(path).catch(() => {});
+      }
       filetree.refreshTree();
       if (!state.doc || path !== state.doc.path || isRecentLocalWrite(path)) break;
       // 外部/Agent 修改：干净则静默重载；脏则只提示冲突，绝不动编辑器缓冲

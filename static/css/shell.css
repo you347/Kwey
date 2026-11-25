@@ -50,6 +50,32 @@
   border-color: transparent;
 }
 
+/* ribbon 悬浮/聚焦短标签：固定定位、浮于面板之上，不改变按钮点击语义 */
+.ribbon-tip {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  max-width: min(220px, calc(100vw - 16px));
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-alt);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-soft);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.ribbon-tip.is-visible { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-tip { transition: none; transform: none; }
+}
+
 /* ---------------- 面板 tab 条 ---------------- */
 .panel-tabs {
   display: flex;
@@ -415,6 +441,7 @@ body.is-resizing .center { pointer-events: none; }
 .rag-turn__warn { color: #d88; font-size: var(--fs-xs); margin-top: 6px; }
 .rag-turn__sources { margin-top: 8px; font-size: var(--fs-xs); color: var(--text-dim); }
 .rag-turn__sources ul { margin: 6px 0 0; padding-left: 18px; }
+.rag-fresh { color: var(--warning); }
 .rag-cite { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0 2px; font: inherit; }
 .rag-cite:hover { text-decoration: underline; }
 
