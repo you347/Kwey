@@ -42,6 +42,22 @@ from app.paths import (
     validate_relative,
 )
 from app.vault.links import LinkRewriter
+from app.vault.provenance import (
+    ActorContext,
+    FIELD_GENERATED,
+    FIELD_HASH_VERSION,
+    FIELD_REVIEWED_AT,
+    FIELD_REVIEWED_HASH,
+    FIELD_RUN_ID,
+    PAYLOAD_SERIALIZATION_VERSION,
+    ProvenanceStore,
+    SYSTEM_ACTOR,
+    actor_fields,
+    describe_note,
+    payload_hash,
+    read_declared_fields,
+    resolve_actor,
+)
 
 MARKDOWN_EXTS = {".md", ".markdown"}
 TRASH_ROOT = ".trash"  # 回收站根目录（vault 相对，IGNORED_DIRS 内）
@@ -70,6 +86,7 @@ class VaultService:
         db: IndexDatabase,
         indexer: Indexer,
         rewriter: LinkRewriter,
+        provenance: Optional[ProvenanceStore] = None,
     ) -> None:
         self.paths = AppPaths(root)
         self.config = config
@@ -77,6 +94,7 @@ class VaultService:
         self.db = db
         self.indexer = indexer
         self.rewriter = rewriter
+        self.provenance = provenance if provenance is not None else ProvenanceStore(root)
         self.lock = threading.RLock()
         self.recent_self_writes: Dict[str, float] = {}
         self._watcher = None  # 由 deps 装配；start_watcher/stop_watcher 转发
@@ -202,6 +220,68 @@ class VaultService:
             "mtime": abs_path.stat().st_mtime,
         }
 
+    # ------------------------------------------------------------------ provenance
+    def _with_managed_fields(
+        self,
+        rel: str,
+        fm: Dict[str, Any],
+        actor: Optional[ActorContext],
+    ) -> Dict[str, Any]:
+        """写入前注入 ``kwey_`` 宿主字段；generated 具粘性，不洗掉历史 Agent 派生。"""
+        ctx = resolve_actor(actor)
+        previous = self.provenance.get_baseline(rel) or {}
+        declared = read_declared_fields(fm)
+        fields = actor_fields(
+            ctx,
+            generated=bool(previous.get("generated")) or declared["generated"],
+        )
+        fm.update(fields)
+        if not ctx.run_id:
+            fm.pop(FIELD_RUN_ID, None)  # 未提供批次就不保留旧关联
+        return fm
+
+    def _record_provenance(
+        self,
+        rel: str,
+        raw: str,
+        actor: Optional[ActorContext],
+        action: str,
+        *,
+        generated: bool = False,
+    ) -> None:
+        """写盘后记录最后已知基线；溯源失败只记日志，绝不阻断笔记写入。"""
+        try:
+            self.provenance.record_write(
+                rel, raw, resolve_actor(actor), action=action, generated=generated
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "溯源基线记录失败（不影响写盘）: %s %s", action, rel, exc_info=True
+            )
+
+    def provenance_info(self, rel: str) -> Dict[str, Any]:
+        """单篇溯源视图（供 provenance read 路由复用）。"""
+        rel = _validate(rel)
+        abs_path = self.paths.to_abs(rel)
+        if not abs_path.is_file():
+            raise HTTPException(status_code=404, detail=f"笔记不存在: {rel}")
+        return describe_note(self.provenance, rel, self._read_text(abs_path))
+
+    def record_external_change(self, rel: str) -> bool:
+        """watcher 用：有基线且 raw hash 变化时只记事件/状态，绝不重写外部文件。"""
+        try:
+            rel = _validate(rel)
+            abs_path = self.paths.to_abs(rel)
+            if not abs_path.is_file():
+                return False
+            raw = self._read_text(abs_path)
+            if not self.provenance.detect_external(rel, raw):
+                return False
+            return self.provenance.record_external(rel, raw)
+        except Exception:  # noqa: BLE001
+            logger.warning("外部变化识别失败: %s", rel, exc_info=True)
+            return False
+
     # ------------------------------------------------------------------ create
     def create_note(
         self,
@@ -209,6 +289,8 @@ class VaultService:
         content: str = "",
         frontmatter: Optional[Dict[str, Any]] = None,
         dedup: bool = False,
+        *,
+        actor: Optional[ActorContext] = None,
     ) -> Dict[str, Any]:
         with self.lock:
             rel = _validate(rel)
@@ -223,12 +305,16 @@ class VaultService:
 
             title = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
             fm = dict(frontmatter or {})
+            fm = self._with_managed_fields(rel, fm, actor)
             fm = fm_mod.normalize_frontmatter_for_write(fm, is_new=True)
             if content == "":
                 content = f"# {title}\n\n"
             text = fm_mod.dump_frontmatter(fm, content)
             self._atomic_write(abs_path, text)
             self._mark_self_write(rel)
+            self._record_provenance(
+                rel, text, actor, "create", generated=bool(fm.get(FIELD_GENERATED))
+            )
             self.indexer.reindex_note(rel)
             revived = self.indexer.revive_for(rel)
             self.eventbus.publish(VaultEvent(EventType.CREATED, path=rel))
@@ -241,12 +327,72 @@ class VaultService:
             return meta
 
     # ------------------------------------------------------------------ write
+    def review_note(
+        self,
+        rel: str,
+        *,
+        expected_payload_hash: str,
+        reviewed_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """人工审阅专用写路径：只刷新 ``kwey_reviewed_*`` 管理字段。
+
+        与 ``write_note`` 的区别：不调用 ``_with_managed_fields``，因此不会把
+        writer_kind/last_writer/run_id/generated 改写成审阅者身份；也不记录新的
+        写入基线，只在原基线上更新 reviewed_* 与 raw/payload hash。这样 Agent
+        来源在审阅后仍可追溯，普通人工保存仍按 ``write_note`` 正常更新写入者。
+        """
+        with self.lock:
+            rel = _validate(rel)
+            abs_path = self.paths.to_abs(rel)
+            if not abs_path.is_file():
+                raise HTTPException(status_code=404, detail=f"笔记不存在: {rel}")
+
+            raw = self._read_text(abs_path)
+            current = payload_hash(raw)
+            expected = (expected_payload_hash or "").strip().lower()
+            if not expected:
+                raise HTTPException(status_code=400, detail="expected_payload_hash 不能为空")
+            if expected != current:
+                raise HTTPException(
+                    status_code=409,
+                    detail="笔记内容已变化，请刷新当前版本后重新审阅",
+                )
+            if self.provenance.get_baseline(rel) is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="该笔记没有本机写入基线，无法标记为已审",
+                )
+
+            stamp = reviewed_at or datetime.now().astimezone().isoformat(timespec="seconds")
+            fm, body = fm_mod.parse_frontmatter(raw)
+            fm[FIELD_REVIEWED_AT] = stamp
+            fm[FIELD_REVIEWED_HASH] = current
+            fm[FIELD_HASH_VERSION] = PAYLOAD_SERIALIZATION_VERSION
+            fm = fm_mod.normalize_frontmatter_for_write(fm, is_new=False)
+            text = fm_mod.dump_frontmatter(fm, body)
+            self._atomic_write(abs_path, text)
+            self._mark_self_write(rel)
+            # 不调用 _record_provenance：审阅不是一次新的写入，基线写入者保持不变。
+            if not self.provenance.record_review(
+                rel, reviewed_hash=current, reviewed_at=stamp, raw=text
+            ):
+                raise HTTPException(status_code=409, detail="溯源基线已失效，无法审阅")
+
+            links_changed = self.indexer.reindex_note(rel)
+            self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))
+            if links_changed:
+                self.eventbus.publish(VaultEvent(EventType.LINKS_CHANGED, path=rel))
+            self._auto_snapshot("update", rel)
+            return {"path": rel, "updated": True, "mtime": abs_path.stat().st_mtime}
+
     def write_note(
         self,
         rel: str,
         content: str,
         frontmatter: Optional[Dict[str, Any]] = None,
         base_mtime: Optional[float] = None,
+        *,
+        actor: Optional[ActorContext] = None,
     ) -> Dict[str, Any]:
         """统一写路径。base_mtime 乐观锁：与磁盘不符抛 409。"""
         with self.lock:
@@ -264,10 +410,15 @@ class VaultService:
 
             if frontmatter is None:
                 frontmatter, _ = fm_mod.parse_frontmatter(self._read_text(abs_path))
-            fm = fm_mod.normalize_frontmatter_for_write(dict(frontmatter), is_new=False)
+            fm = dict(frontmatter)
+            fm = self._with_managed_fields(rel, fm, actor)
+            fm = fm_mod.normalize_frontmatter_for_write(fm, is_new=False)
             text = fm_mod.dump_frontmatter(fm, content)
             self._atomic_write(abs_path, text)
             self._mark_self_write(rel)
+            self._record_provenance(
+                rel, text, actor, "write", generated=bool(fm.get(FIELD_GENERATED))
+            )
             links_changed = self.indexer.reindex_note(rel)
             self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))
             if links_changed:
@@ -279,7 +430,15 @@ class VaultService:
                 "mtime": abs_path.stat().st_mtime,
             }
 
-    def write_raw(self, rel: str, text: str, publish_event: bool = True) -> bool:
+    def write_raw(
+        self,
+        rel: str,
+        text: str,
+        publish_event: bool = True,
+        *,
+        actor: Optional[ActorContext] = None,
+        action: str = "write_raw",
+    ) -> bool:
         """原样写文本（链接重写器内部使用）：统一锁/原子写/自写标记/增量索引。"""
         with self.lock:
             rel = _validate(rel)
@@ -288,6 +447,11 @@ class VaultService:
                 return False
             self._atomic_write(abs_path, text)
             self._mark_self_write(rel)
+            # 链接重写等内部原样写：无显式/上下文身份时记 system，不伪造成作者。
+            ctx = resolve_actor(actor)
+            if ctx.kind == "unknown":
+                ctx = SYSTEM_ACTOR
+            self._record_provenance(rel, text, ctx, action)
             links_changed = self.indexer.reindex_note(rel)
             if publish_event:
                 self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))

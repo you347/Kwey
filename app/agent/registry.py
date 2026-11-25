@@ -20,13 +20,24 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.agent import journal
 from app.api import deps
 from app.api.routes_search import _hybrid_search, build_match_terms, parse_query
+from app.freshness import (
+    STATE_UNKNOWN,
+    FreshnessIndex,
+    annotate,
+    downweight_enabled,
+    parse_as_of_param,
+    rerank,
+)
 from app.paths import normalize_rel
+from app.vault.provenance import ActorContext, get_current_actor, use_actor
 from app.vault.service import VaultService
 
 CONTRACT_VERSION = 1
@@ -127,23 +138,50 @@ def _search(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
     if mode not in ("fts", "hybrid"):
         mode = "fts"  # 非法 mode 回落 fts；hybrid 走下方 RRF 融合分支
     limit = a.get("limit", 50)
+    try:
+        as_of = parse_as_of_param(a.get("as_of"))
+    except ValueError as exc:
+        raise ContractError(400, str(exc)) from exc
     parsed = parse_query(q)
     match_terms = build_match_terms(parsed["terms"])  # type: ignore[arg-type]
+    downweight = downweight_enabled(vault.config)
+    need_freshness = downweight or as_of is not None
+    cand_limit = min(max(int(limit) * 3, 60), 200) if need_freshness else limit
     vector_info = None
     if mode == "hybrid":
         # A2：真·混合检索（FTS + 向量 + 链接图 RRF）；向量不可用时自动降级纯 FTS
-        hits, total, vector_info = _hybrid_search(vault.db, parsed, match_terms, limit)
+        hits, total, vector_info = _hybrid_search(vault.db, parsed, match_terms, cand_limit)
     else:
         hits, total = vault.db.search(
             terms=match_terms,
             path_prefix=parsed["path"],  # type: ignore[arg-type]
             tag=parsed["tag"],  # type: ignore[arg-type]
             file_pattern=parsed["file"],  # type: ignore[arg-type]
-            limit=limit,
+            limit=cand_limit,
         )
+    freshness_info = None
+    if need_freshness and hits:
+        # P2-D：与 REST/RAG 同口径，在融合后、截断前降权并补入有效替代证据。
+        hits, freshness_info = rerank(
+            hits,
+            vault.db,
+            as_of=as_of,
+            downweight=downweight,
+            historical=as_of is not None,
+            make_entry=lambda path, score: {
+                "path": path,
+                "title": (vault.db.get_note(path) or {}).get("title") or path,
+                "score": score,
+                "snippet": "",
+                "tags": vault.db.tags_of_note(path),
+            },
+        )
+        hits = hits[:limit]
     result = {"hits": hits, "total": total, "query": q, "mode": mode}
     if vector_info is not None:
         result["vector"] = vector_info  # 标注后端状态，便于 Agent 判断召回质量
+    if freshness_info is not None:
+        result["freshness"] = freshness_info
     return result
 
 
@@ -159,6 +197,15 @@ def _read(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
     doc["offset"] = offset
     doc["total_chars"] = total
     doc["truncated"] = end < total
+    try:
+        as_of = parse_as_of_param(a.get("as_of"))
+    except ValueError as exc:
+        raise ContractError(400, str(exc)) from exc
+    info = FreshnessIndex(
+        vault.db, as_of=as_of, historical=as_of is not None
+    ).meta(doc["path"])
+    if info["state"] != STATE_UNKNOWN:
+        doc["freshness"] = annotate(info)
     return doc
 
 
@@ -379,7 +426,7 @@ def _organize_apply(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
 
     ops = a["ops"]
     validate_ops(ops)
-    return apply_ops(ops, vault)
+    return apply_ops(ops, vault, actor=get_current_actor())
 
 
 # ---------------------------------------------------------------- 工具实现（W4 新增 5 个）
@@ -524,13 +571,14 @@ def _register(
 
 _register(
     "kwey.search",
-    "搜索笔记：mode=fts 用 FTS5 BM25；mode=hybrid 用 FTS+向量+链接图 RRF 融合（向量不可用时降级 FTS）。支持 path:/tag:/file: 操作符，返回 hits。",
+    "搜索笔记：mode=fts 用 FTS5 BM25；mode=hybrid 用 FTS+向量+链接图 RRF 融合（向量不可用时降级 FTS）。支持 path:/tag:/file: 操作符，返回 hits；默认对未生效/过期/被替代的事实降权并附可选 freshness 元数据。",
     {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "检索词，可含 path:/tag:/file: 操作符；空串为纯过滤浏览"},
             "limit": {"type": "integer", "description": "返回条数上限（1-200，默认 50）", "minimum": 1, "maximum": 200},
             "mode": {"type": "string", "description": "fts（默认 BM25）；hybrid = FTS+向量+链接图 RRF 融合，向量不可用时降级纯 FTS", "enum": ["fts", "hybrid"]},
+            "as_of": {"type": "string", "description": "按该时点评估有效期（ISO 日期/时间，如 2025-06-01 或 2025-06-01T12:00:00+08:00）；缺省为当前。历史查询不会被今天的状态压低"},
         },
         "required": ["query"],
     },
@@ -548,7 +596,7 @@ _register(
 )
 _register(
     "kwey.read",
-    "读取笔记正文（默认最多 8000 字符）。长笔记用 offset 续读，按 truncated / total_chars 判断是否还有剩余。",
+    "读取笔记正文（默认最多 8000 字符）。长笔记用 offset 续读，按 truncated / total_chars 判断是否还有剩余。有生命周期声明时附带可选 freshness 元数据。",
     {
         "type": "object",
         "properties": {
@@ -567,6 +615,7 @@ _register(
                 "maximum": 40000,
                 "default": 8000,
             },
+            "as_of": {"type": "string", "description": "按该时点评估有效期（ISO 日期/时间）；缺省为当前"},
         },
         "required": ["path"],
     },
@@ -880,6 +929,35 @@ _register(
 )
 
 
+# ---------------------------------------------------------------- 工具实现（C 会话蒸馏）
+def _session_distill(vault: VaultService, a: Dict[str, Any]) -> Dict[str, Any]:
+    """标准会话输入 → 六类槽位待审草案（只写 .kwey 控制文件，不写普通笔记）。"""
+    from app.agent.session_distill import DistillError, create_draft
+
+    payload = a["payload"]  # schema 保证 object
+    try:
+        return create_draft(Path(vault.paths.root), payload)
+    except DistillError as exc:
+        raise ContractError(400, f"会话输入校验失败: {exc}") from None
+
+
+_register(
+    "kwey.session.distill",
+    "把跨 Agent 标准会话输入蒸馏成待审草案：校验 schema_version/source/events，计算来源 hash，提取决策/约束/证伪/未完成/稳定知识候选/遗漏。每条事实带 source_event_ids，无依据不保存。只返回待审 draft_id（幂等），不写普通笔记、不自动批准；同源重复提交返回既有草案。",
+    {
+        "type": "object",
+        "properties": {
+            "payload": {
+                "type": "object",
+                "description": "标准会话导出对象：schema_version=1、source{agent,session_id,export_hash?}、goal?、events[{id,kind,text,ts?}]、retention=selected_evidence",
+            },
+        },
+        "required": ["payload"],
+    },
+    "write", "reversible", "create", _session_distill,
+)
+
+
 # ---------------------------------------------------------------- 公共 API
 def contract() -> Dict[str, Any]:
     """契约快照（不含 handler）：version + 全量工具元数据，供 /contract 与文档生成。"""
@@ -907,21 +985,51 @@ def _journal_paths(name: str, args: Dict[str, Any], data: Any) -> List[str]:
     if name in ("kwey.capture", "kwey.views.save") and isinstance(data, dict):
         # 这两个工具的落盘路径由 handler 生成（args 里没有 path）
         return [str(data.get("path") or "")]
+    if name == "kwey.session.distill" and isinstance(data, dict):
+        # 蒸馏只落 .kwey/session 控制文件；留痕记录草案路径便于审计
+        return [str(data.get("draft_path") or "")]
     path = args.get("path") or args.get("from") or args.get("trash_path") or ""
     return [str(path)]
+
+
+def _actor_context(actor: Any) -> Optional[ActorContext]:
+    """传输层 actor（dict / ActorContext）→ 可信宿主身份。
+
+    dict 来自 REST token 记录、MCP 启动配置或进程内固定身份；客户端自填的
+    ``kind=human`` 不被采信——只有 agent / system 可显式声明，其余按 agent。
+    """
+    if actor is None:
+        return None
+    if isinstance(actor, ActorContext):
+        return actor
+    if not isinstance(actor, dict):
+        return None
+    kind = str(actor.get("kind") or "").strip().lower()
+    if kind not in ("agent", "system"):
+        kind = "agent"
+    return ActorContext(
+        kind=kind,
+        name=actor.get("name") or "",
+        origin=actor.get("origin") or "",
+        run_id=actor.get("run_id"),
+        role=actor.get("role") or "",
+    )
 
 
 def invoke(
     name: str,
     arguments: Optional[Dict[str, Any]],
     vault: Optional[VaultService] = None,
-    actor: Optional[Dict[str, Any]] = None,
+    actor: Optional[Any] = None,
+    *,
+    run_id: Optional[str] = None,
 ) -> Any:
-    """唯一能力入口：schema 校验 → handler → journal（仅写类工具且带 actor）。
+    """唯一能力入口：schema 校验 → handler（绑定 actor ContextVar）→ journal。
 
     vault=None 取 deps 单例（未打开 vault 抛 400）；进程内测试/内置智能体可注入。
-    actor={"role","name"} 由传输层注入（MCP=mcp-stdio/admin，REST=token 记录）；
-    actor=None 时不写 journal（内部调用 / 测试保持纯净）。
+    actor={"role","name",...} 由传输层注入（MCP=mcp-stdio/admin，REST=token 记录）；
+    actor=None 时不绑定 ContextVar、不写 journal（内部纯调用保持纯净）。
+    handler 调用期设置 ContextVar，try/finally 严格恢复，异常路径也不串身份。
     ContractError 由传输层映射；HTTPException / 其它异常原样上抛由传输层兜底。
     """
     tool = _TOOLS.get(name)
@@ -933,16 +1041,22 @@ def invoke(
         raise ContractError(400, "arguments 必须是对象")
     _validate(tool["input_schema"], arguments)
     service = vault if vault is not None else deps.require_vault()
-    data = tool["handler"](service, arguments)
+
+    ctx = _actor_context(actor)
+    if ctx is not None and run_id:
+        ctx = replace(ctx, run_id=run_id)
+    with use_actor(ctx) if ctx is not None else nullcontext():
+        data = tool["handler"](service, arguments)
+
     action = tool["journal_action"]
-    if action and actor is not None:
+    if action and ctx is not None:
         root = service.paths.ensure_root()
         for path in _journal_paths(name, arguments, data):
             journal.append(
                 root,
                 {
-                    "role": actor.get("role", ""),
-                    "name": actor.get("name", ""),
+                    "role": ctx.role,
+                    "name": ctx.name,
                     "action": action,
                     "path": path,
                 },

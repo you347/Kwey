@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api import deps
+from app.vault.provenance import LOCAL_UI_ACTOR
 from app.vault.service import VaultService
 
 router = APIRouter(prefix="/api/review", tags=["review"])
@@ -225,7 +226,7 @@ async def mark(req: MarkRequest) -> Dict[str, Any]:
     frontmatter["review_last"] = today.isoformat()
 
     # 统一写路径：正文原样保留，其余自定义字段不丢
-    vault.write_note(note["path"], note["content"], frontmatter)
+    vault.write_note(note["path"], note["content"], frontmatter, actor=LOCAL_UI_ACTOR)
     return {
         "code": 0,
         "data": {
@@ -287,7 +288,7 @@ async def schedule(req: ScheduleRequest) -> Dict[str, Any]:
 
     frontmatter["review_due"] = due.isoformat()
     frontmatter["review_interval"] = interval
-    vault.write_note(note["path"], note["content"], frontmatter)
+    vault.write_note(note["path"], note["content"], frontmatter, actor=LOCAL_UI_ACTOR)
     return {
         "code": 0,
         "data": {
@@ -310,7 +311,9 @@ async def unschedule(path: str) -> Dict[str, Any]:
     for key in removed:
         frontmatter.pop(key, None)
     if removed:
-        vault.write_note(note["path"], note["content"], frontmatter)
+        vault.write_note(
+            note["path"], note["content"], frontmatter, actor=LOCAL_UI_ACTOR
+        )
     return {
         "code": 0,
         "data": {"path": note["path"], "removed": removed},

@@ -47,6 +47,7 @@ html[data-theme="dark"] {
   --broken: #f0616d;
   --danger-text: #2a0b0e;
   --success: #3fb950;
+  --warning: #e0a63c;
   --mark: rgba(255, 199, 92, 0.26);
   --tag: #c9d2cd;
   --tag-bg: rgba(255, 255, 255, 0.07);
@@ -89,6 +90,7 @@ html[data-theme="light"] {
   --broken: #cf222e;
   --danger-text: #ffffff;
   --success: #1a7f37;
+  --warning: #9a6200;
   --mark: #ffe9a8;
   --tag: #0c7f6b;
   --tag-bg: rgba(12, 127, 107, 0.09);

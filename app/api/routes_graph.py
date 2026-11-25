@@ -11,6 +11,7 @@ from app.api import deps
 from app.models import LinkifyRequest
 from app.parser.wikilink import extract_wikilinks, split_anchor
 from app.paths import normalize_rel
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -116,7 +117,12 @@ async def linkify(req: LinkifyRequest):
     if not replaced:
         raise HTTPException(status_code=404, detail="未找到可转换的提及文本")
 
-    vault.write_note(req.path, content="".join(lines), frontmatter=doc["frontmatter"])
+    vault.write_note(
+        req.path,
+        content="".join(lines),
+        frontmatter=doc["frontmatter"],
+        actor=LOCAL_UI_ACTOR,
+    )
     return {
         "code": 0,
         "data": {"linked": True, "link_text": link_text, "path": req.path},

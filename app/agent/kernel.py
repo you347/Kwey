@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from app.agent import registry
@@ -28,7 +29,12 @@ from app.paths import PathError, validate_relative
 from app.api import deps
 from app.vault.service import VaultService
 
-BUILTIN_ACTOR = {"role": "admin", "name": "kwey-built-in"}
+BUILTIN_ACTOR = {
+    "role": "admin",
+    "name": "kwey-built-in",
+    "kind": "agent",
+    "origin": "builtin",
+}
 MAX_STEPS = 8
 
 # 危险 / 结构性操作：必须经 UI 用户确认，内核绝不自动放行。
@@ -283,11 +289,14 @@ def run_chat(
     vault: Optional[VaultService] = None,
     resume: Optional[Dict[str, Any]] = None,
     context: Optional[Dict[str, Any]] = None,
+    *,
+    run_id: Optional[str] = None,
 ) -> Iterator[Dict[str, Any]]:
     """执行一轮内置智能体对话，yield SSE 步骤事件。
 
     ``context={"path", "kind"}`` 为前端上报的当前工作区（打开中的笔记 / 文件夹），
     仅拼进 system 供模型解析「这个 / 这篇 / 这里」，不影响鉴权与工具权限。
+    ``run_id`` 是本轮对话批次号，透传给溯源基线，不用于鉴权。
     事件 type：tool_call / tool_result / ui / confirm_required / message / error / done。
     ``resume={"id": 被批准工具调用 id}`` 时先强制执行该调用（confirm=true），再续跑。
     危险操作暂停时 done 事件携带 pending，客户端批准后原样回传 messages + resume。
@@ -296,6 +305,9 @@ def run_chat(
     provider = AgentProvider(service.paths.ensure_root())
     tools, name_map = _tools_for_llm()
     msgs = _ensure_system(messages, service, context)
+    # 每轮对话是一个真实批次；未显式给 run_id 时生成内部批次号（不是身份）。
+    actor = dict(BUILTIN_ACTOR)
+    actor["run_id"] = run_id or f"chat:{uuid.uuid4().hex[:12]}"
 
     def execute(call: Dict[str, Any], force_confirm: bool = False) -> Iterator[Dict[str, Any]]:
         real = name_map.get(call["name"], call["name"])
@@ -304,7 +316,7 @@ def run_chat(
             args["confirm"] = True
         yield {"type": "tool_call", "id": call["id"], "name": real, "arguments": args}
         try:
-            data = registry.invoke(real, args, vault=service, actor=BUILTIN_ACTOR)
+            data = registry.invoke(real, args, vault=service, actor=actor)
             ok, error = True, ""
         except Exception as exc:  # noqa: BLE001 业务/契约异常回灌给模型，不中断对话
             data, ok, error = None, False, str(getattr(exc, "detail", None) or getattr(exc, "message", None) or exc)

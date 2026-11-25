@@ -17,6 +17,7 @@ from app.api import deps
 from app.models import TemplateApplyRequest
 from app.parser.frontmatter import parse_frontmatter
 from app.paths import ILLEGAL_FILENAME_CHARS, AppPaths, normalize_rel
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -144,7 +145,9 @@ async def apply_template(req: TemplateApplyRequest):
 
     content = _replace_placeholders(body, title)
     fm = _replace_in_obj(frontmatter, title)
-    meta = vault.create_note(rel, content=content, frontmatter=fm, dedup=False)
+    meta = vault.create_note(
+        rel, content=content, frontmatter=fm, dedup=False, actor=LOCAL_UI_ACTOR
+    )
     return {
         "code": 0,
         "data": {"path": meta["path"], "title": meta.get("title") or title},

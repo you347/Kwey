@@ -22,8 +22,12 @@ from app.agent.ops import apply_ops, preview_ops, validate_ops
 from app.agent.provider import AgentProvider, ProviderError
 from app.api import deps
 from app.api.guard import require_token
+from app.vault.provenance import ActorContext
 
 router = APIRouter(prefix="/api/agent", tags=["organize"])
+
+# AI 整理 ops + 人工确认：保留 Agent 派生身份。
+ORGANIZE_ACTOR = ActorContext(kind="agent", name="kwey-organize", origin="local-ui-apply")
 
 
 class PreviewRequest(BaseModel):
@@ -86,5 +90,5 @@ async def organize_apply(request: Request, req: ApplyRequest):
         )
     vault = deps.require_vault()
     validate_ops(req.ops)
-    data = apply_ops(req.ops, vault)
+    data = apply_ops(req.ops, vault, actor=ORGANIZE_ACTOR)
     return {"code": 0, "data": data, "message": "ok"}

@@ -19,12 +19,14 @@ op 结构（``list[dict]``），``type`` 取值见 :data:`OP_TYPES`::
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
 from app.parser import frontmatter as fm_mod
 from app.paths import PathError, validate_relative
+from app.vault.provenance import ActorContext, resolve_actor
 from app.vault.service import VaultService
 
 OP_TYPES = {"create", "append", "tag", "link", "move", "delete"}
@@ -206,12 +208,23 @@ def _preview_one(op: Dict[str, Any], vault: VaultService) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------- apply
-def apply_ops(ops: Any, vault: VaultService) -> Dict[str, Any]:
+def apply_ops(
+    ops: Any,
+    vault: VaultService,
+    *,
+    actor: Optional[ActorContext] = None,
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """校验后逐项应用（一律走 VaultService）。
 
+    ``actor`` 为显式内部身份；缺省沿用当前 ContextVar（registry.invoke 已绑定），
+    两者都没有才 unknown。``run_id`` 用于职责/编译等批次关联。
     返回 ``{"applied": N, "paths": [...], "rewritten_links": N}``。
     单项失败抛 ``HTTPException`` 并说明第几项；已应用的前置项不回滚（见报告取舍）。
     """
+    ctx = resolve_actor(actor)
+    if run_id:
+        ctx = replace(ctx, run_id=run_id)
     validated = validate_ops(ops)
     applied_paths: List[str] = []
     rewritten_total = 0
@@ -219,7 +232,7 @@ def apply_ops(ops: Any, vault: VaultService) -> Dict[str, Any]:
         where = f"第 {i + 1} 项 op"
         op_type, rel = op["type"], op["path"]
         try:
-            final_path, rewritten = _apply_one(op, vault)
+            final_path, rewritten = _apply_one(op, vault, actor=ctx)
         except HTTPException as exc:
             raise HTTPException(
                 status_code=exc.status_code,
@@ -234,13 +247,18 @@ def apply_ops(ops: Any, vault: VaultService) -> Dict[str, Any]:
     }
 
 
-def _apply_one(op: Dict[str, Any], vault: VaultService) -> Tuple[str, int]:
+def _apply_one(
+    op: Dict[str, Any],
+    vault: VaultService,
+    *,
+    actor: Optional[ActorContext] = None,
+) -> Tuple[str, int]:
     """应用单项 → (结果路径, 重写链接数)。"""
     op_type, rel = op["type"], op["path"]
 
     if op_type == "create":
         # 传空串让 create_note 自行补默认标题 / frontmatter
-        meta = vault.create_note(rel, content=str(op.get("content") or ""))
+        meta = vault.create_note(rel, content=str(op.get("content") or ""), actor=actor)
         return str(meta.get("path") or rel), 0
 
     if op_type == "move":
@@ -262,5 +280,5 @@ def _apply_one(op: Dict[str, Any], vault: VaultService) -> Tuple[str, int]:
     elif op_type == "tag":
         fm = _add_tag(fm, str(op.get("tag") or ""))
         content = body
-    vault.write_note(rel, content=content, frontmatter=fm)
+    vault.write_note(rel, content=content, frontmatter=fm, actor=actor)
     return rel, 0

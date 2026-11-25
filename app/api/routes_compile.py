@@ -27,8 +27,12 @@ from app.agent.compiler import (
 from app.agent.ops import apply_ops
 from app.agent.provider import AgentProvider, ProviderError
 from app.api import deps
+from app.vault.provenance import ActorContext
 
 router = APIRouter(prefix="/api/compile", tags=["compile"])
+
+# AI 编译 ops + 人工确认：保留 Agent 派生身份。
+COMPILE_ACTOR = ActorContext(kind="agent", name="kwey-compile", origin="local-ui-apply")
 
 
 def get_compile_provider() -> AgentProvider:
@@ -91,7 +95,7 @@ async def compile_apply(req: ApplyRequest):
         )
     vault = deps.require_vault()
     assert_compile_ops(req.ops, DEFAULT_RAW_DIR, DEFAULT_WIKI_DIR)
-    data = apply_ops(req.ops, vault)
+    data = apply_ops(req.ops, vault, actor=COMPILE_ACTOR)
     return {"code": 0, "data": data, "message": "ok"}
 
 

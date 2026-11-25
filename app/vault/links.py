@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Iterable, List, Optional, Set, Tuple
 
 from app.index.database import IndexDatabase
 from app.index.linkgraph import LinkGraph
 from app.parser.wikilink import WIKILINK_RE, parse_wikilink_text, split_anchor
 from app.paths import AppPaths
+from app.vault.provenance import SYSTEM_ACTOR, get_current_actor
 
 
 class LinkRewriter:
@@ -42,6 +44,12 @@ class LinkRewriter:
             重写的链接总数（不含未变化的引用方文件数）。
         """
         count = 0
+        initiator = get_current_actor()
+        link_actor = (
+            replace(SYSTEM_ACTOR, run_id=initiator.run_id)
+            if initiator is not None and initiator.run_id
+            else SYSTEM_ACTOR
+        )
         for src in self.collect_referencing_files(old_path):
             try:
                 abs_path = self.paths.to_abs(src)
@@ -59,7 +67,9 @@ class LinkRewriter:
                 continue
             new_raw, n = self.rewrite_text(raw, targets, old_path, new_path, src)
             if n > 0:
-                if writer.write_raw(src, new_raw):
+                if writer.write_raw(
+                    src, new_raw, actor=link_actor, action="links_rewrite"
+                ):
                     count += n
         return count
 

@@ -12,6 +12,7 @@ from app.models import NoteCreateRequest, NoteUpdateRequest, RenderRequest
 from app.parser.outline import extract_outline
 from app.parser.renderer import render_markdown
 from app.paths import normalize_rel
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 router = APIRouter(prefix="/api", tags=["notes"])
 
@@ -27,7 +28,9 @@ async def get_note(path: str):
 @router.post("/note")
 async def create_note(req: NoteCreateRequest):
     vault = deps.require_vault()
-    meta = vault.create_note(req.path, content=req.content, frontmatter=req.frontmatter)
+    meta = vault.create_note(
+        req.path, content=req.content, frontmatter=req.frontmatter, actor=LOCAL_UI_ACTOR
+    )
     return {"code": 0, "data": meta, "message": "ok"}
 
 
@@ -35,7 +38,11 @@ async def create_note(req: NoteCreateRequest):
 async def update_note(req: NoteUpdateRequest):
     vault = deps.require_vault()
     result = vault.write_note(
-        req.path, content=req.content, frontmatter=req.frontmatter, base_mtime=req.base_mtime
+        req.path,
+        content=req.content,
+        frontmatter=req.frontmatter,
+        base_mtime=req.base_mtime,
+        actor=LOCAL_UI_ACTOR,
     )
     return {"code": 0, "data": result, "message": "ok"}
 

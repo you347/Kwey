@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.agent.provider import AgentProvider, ProviderError, chat_json
 from app.api import deps
 from app.paths import normalize_rel
+from app.vault.provenance import LOCAL_UI_ACTOR, ActorContext
 
 router = APIRouter(prefix="/api", tags=["inbox"])
 
@@ -79,7 +80,7 @@ async def capture(req: CaptureRequest):
         frontmatter["tags"] = tags
 
     meta = vault.create_note(rel, content=text + ("\n" if not text.endswith("\n") else ""),
-                             frontmatter=frontmatter, dedup=True)
+                             frontmatter=frontmatter, dedup=True, actor=LOCAL_UI_ACTOR)
     return {"code": 0, "data": {"path": meta["path"], "title": meta.get("title") or title}, "message": "ok"}
 
 
@@ -267,6 +268,8 @@ class ApplyRequest(BaseModel):
 @router.post("/inbox/apply")
 async def apply(req: ApplyRequest):
     vault = deps.require_vault()
+    # AI 建议 + 人工点「应用」：保留 Agent 派生身份，不洗成纯 human。
+    apply_actor = ActorContext(kind="agent", name="kwey-inbox", origin="local-ui-apply")
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
 
@@ -285,7 +288,9 @@ async def apply(req: ApplyRequest):
                     fm["tags"] = tags
                 else:
                     fm.pop("tags", None)
-                vault.write_note(current, content=note["content"], frontmatter=fm)
+                vault.write_note(
+                    current, content=note["content"], frontmatter=fm, actor=apply_actor
+                )
 
             # 2) 移动目录（同时重写指向它的链接）
             if item.folder is not None:

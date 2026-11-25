@@ -34,6 +34,7 @@ from fastapi import APIRouter, HTTPException
 from app.api import deps
 from app.parser.frontmatter import parse_frontmatter
 from app.paths import ILLEGAL_FILENAME_CHARS
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 router = APIRouter(prefix="/api/periodic", tags=["periodic"])
 
@@ -233,7 +234,9 @@ def _ensure_note(kind: str, d: dt_date) -> Dict[str, Any]:
         content = _replace(body, info["mapping"])
         frontmatter = _replace_in_obj(frontmatter, info["mapping"])
         try:
-            vault.create_note(rel, content=content, frontmatter=frontmatter)
+            vault.create_note(
+                rel, content=content, frontmatter=frontmatter, actor=LOCAL_UI_ACTOR
+            )
         except HTTPException as exc:
             if exc.status_code != 409:  # 并发下已被创建：幂等返回
                 raise

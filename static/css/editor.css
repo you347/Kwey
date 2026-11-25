@@ -58,7 +58,121 @@
   font-weight: 600;
   box-shadow: var(--shadow-soft);
 }
+.editor-toolbar__right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .save-state { font-size: var(--fs-xs); color: var(--text-dim); }
+
+/* ---------------- 写入溯源徽标 / 详情浮层（B1） ---------------- */
+.prov-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prov-badge:hover { background: var(--bg-hover); color: var(--text); }
+.prov-badge.hidden { display: none; }
+.prov-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: none;
+}
+.prov-badge[data-state="agent_unreviewed"] { color: var(--warning); border-color: var(--border-strong); }
+.prov-badge[data-state="agent_unreviewed"] .prov-badge__dot { background: var(--warning); }
+.prov-badge[data-state="agent_reviewed_current"] { color: var(--success); }
+.prov-badge[data-state="agent_reviewed_current"] .prov-badge__dot { background: var(--success); }
+.prov-badge[data-state="external_changed"] { color: var(--broken); border-color: var(--border-strong); }
+.prov-badge[data-state="external_changed"] .prov-badge__dot { background: var(--broken); }
+
+.prov-pop {
+  position: fixed;
+  z-index: 95;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.prov-pop.hidden { display: none; }
+.prov-pop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--fs-sm);
+}
+.prov-pop__body { font-size: var(--fs-xs); line-height: 1.5; }
+.prov-row {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border-faint);
+}
+.prov-row:last-of-type { border-bottom: none; }
+.prov-row__k { color: var(--text-dim); flex: none; }
+.prov-row__v { text-align: right; word-break: break-all; }
+.prov-hint { margin-top: 8px; color: var(--text-dim); line-height: 1.55; }
+.prov-hint--warn { color: var(--warning); }
+.prov-hint--error { color: var(--broken); }
+.prov-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+/* ---------------- 知识保鲜徽标 / 详情浮层（P2-D） ---------------- */
+.fresh-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fresh-badge:hover { background: var(--bg-hover); color: var(--text); }
+.fresh-badge.hidden { display: none; }
+.fresh-badge[data-state="not_yet_effective_declared"] { color: var(--warning); border-color: var(--border-strong); }
+.fresh-badge[data-state="expired_declared"],
+.fresh-badge[data-state="superseded_declared"] { color: var(--broken); border-color: var(--border-strong); }
+.fresh-badge[data-state="invalid_metadata"] { color: var(--warning); border-color: var(--broken); }
+.fresh-badge[data-state="current_declared"] { color: var(--success); }
+
+.fresh-pop {
+  position: fixed;
+  z-index: 96;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.fresh-pop.hidden { display: none; }
+
+@media (max-width: 720px) {
+  .editor-toolbar { flex-wrap: wrap; gap: 6px; }
+  .editor-toolbar__right { flex: 1 1 100%; justify-content: flex-end; }
+  .prov-badge { max-width: 60vw; }
+}
 
 /* 保存状态语义圆点：编辑中灰点呼吸 / 已保存绿 / 失败红 */
 .save-state, .secondary-save-state { display: inline-flex; align-items: center; gap: 6px; }

@@ -2,13 +2,20 @@
  * 行内悬浮按钮与右键菜单共用同一组动作函数。 */
 
 import { api, reportError } from './api.js';
-import { state, emit } from './state.js';
+import { state, emit, on } from './state.js';
 import { toast, confirmDialog, copyPath, $ } from './utils.js';
 import { askText } from './dialog.js';
 import { showContextMenu } from './contextmenu.js';
+import { scanUnreviewed, invalidate } from './provenance.js';
 
 const expandedDirs = new Set();
 let treeEl = null;
+let lastTree = [];
+let onlyUnreviewed = false;
+let unreviewedPaths = new Set();
+let scanning = false;
+let scanMeta = null;
+let scanSeq = 0;
 
 function icon(id) {
   return `<svg class="icon" aria-hidden="true"><use href="#${id}"/></svg>`;
@@ -16,7 +23,85 @@ function icon(id) {
 
 export function initFiletree() {
   treeEl = $('#filetree');
+  const filterBtn = $('#btn-unreviewed-filter');
+  if (filterBtn) filterBtn.addEventListener('click', () => toggleUnreviewedFilter());
+  on('provenance-updated', ({ path } = {}) => {
+    if (!onlyUnreviewed) return;
+    invalidate(path);
+    refreshTree();
+  });
+  on('ws:updated', ({ path } = {}) => {
+    if (!onlyUnreviewed) return;
+    invalidate(path);
+    refreshTree();
+  });
   return refreshTree();
+}
+
+async function toggleUnreviewedFilter() {
+  onlyUnreviewed = !onlyUnreviewed;
+  if (!onlyUnreviewed) {
+    scanSeq += 1;  // 丢弃仍在途的扫描结果
+    scanning = false;
+    unreviewedPaths = new Set();
+    scanMeta = null;
+    syncFilterButton();
+    renderCurrentTree();
+    return;
+  }
+  syncFilterButton();
+  await applyUnreviewedScan(true);
+  renderCurrentTree();
+}
+
+function collectNotePaths(nodes, out = []) {
+  for (const node of nodes || []) {
+    if (node.type === 'note') out.push(node.path);
+    else if (node.children) collectNotePaths(node.children, out);
+  }
+  return out;
+}
+
+async function applyUnreviewedScan(force = false) {
+  const seq = ++scanSeq;
+  scanning = true;
+  syncFilterButton();
+  try {
+    const result = await scanUnreviewed(collectNotePaths(lastTree), { force });
+    if (seq !== scanSeq || !onlyUnreviewed) return;
+    unreviewedPaths = result.paths;
+    scanMeta = result;
+    expandDirsFor(lastTree);
+  } catch (err) {
+    if (seq !== scanSeq) return;
+    unreviewedPaths = new Set();
+    scanMeta = null;
+    reportError(err);
+  } finally {
+    if (seq === scanSeq) {
+      scanning = false;
+      syncFilterButton();
+    }
+  }
+}
+
+function syncFilterButton() {
+  const btn = $('#btn-unreviewed-filter');
+  if (!btn) return;
+  btn.classList.toggle('btn--active', onlyUnreviewed);
+  btn.setAttribute('aria-pressed', String(onlyUnreviewed));
+  if (scanning) {
+    btn.textContent = '筛选中…';
+    btn.title = '正在读取各笔记的溯源状态';
+    return;
+  }
+  btn.textContent = onlyUnreviewed ? `未审 ${unreviewedPaths.size}` : '未审';
+  const parts = ['只看 Agent 改写且尚未审阅的笔记'];
+  if (onlyUnreviewed && scanMeta) {
+    parts.push(`已检查 ${scanMeta.scanned}/${scanMeta.total} 篇`);
+    if (scanMeta.truncated) parts.push('超过上限，仅检查前 500 篇');
+  }
+  btn.title = parts.join('；');
 }
 
 /**
@@ -40,17 +125,44 @@ export async function refreshTree() {
   if (!treeEl) return;
   try {
     const tree = await api.get('/api/tree');
-    treeEl.innerHTML = '';
-    if (!tree.length) {
-      treeEl.innerHTML = '<div class="panel-empty">（空目录）</div>';
-      return;
-    }
-    renderNodes(tree, treeEl);
+    lastTree = Array.isArray(tree) ? tree : [];
+    if (onlyUnreviewed) await applyUnreviewedScan();
+    renderCurrentTree();
   } catch (err) { reportError(err); }
 }
 
-function renderNodes(nodes, container) {
+function renderCurrentTree() {
+  if (!treeEl) return;
+  treeEl.innerHTML = '';
+  if (!lastTree.length) {
+    treeEl.innerHTML = '<div class="panel-empty">（空目录）</div>';
+    return;
+  }
+  const rendered = renderNodes(lastTree, treeEl, onlyUnreviewed);
+  if (onlyUnreviewed && rendered === 0) {
+    treeEl.innerHTML = '<div class="panel-empty">没有 Agent 改写未审的笔记</div>';
+  }
+}
+
+/** 过滤模式下自动展开含未审笔记的目录，避免结果藏在折叠目录里。 */
+function expandDirsFor(nodes) {
+  let has = false;
+  for (const node of nodes || []) {
+    if (node.type === 'note') {
+      if (unreviewedPaths.has(node.path)) has = true;
+    } else if (node.children && expandDirsFor(node.children)) {
+      expandedDirs.add(node.path);
+      has = true;
+    }
+  }
+  return has;
+}
+
+function renderNodes(nodes, container, filtered = false) {
+  let rendered = 0;
   for (const node of nodes) {
+    if (filtered && node.type !== 'dir' && !unreviewedPaths.has(node.path)) continue;
+
     const wrap = document.createElement('div');
     wrap.className = 'tree-node';
     const row = document.createElement('div');
@@ -83,7 +195,11 @@ function renderNodes(nodes, container) {
     if (node.type === 'dir') {
       const children = document.createElement('div');
       children.className = `tree-children${expandedDirs.has(node.path) ? '' : ' collapsed'}`;
-      if (node.children && node.children.length) renderNodes(node.children, children);
+      const childCount = node.children && node.children.length
+        ? renderNodes(node.children, children, filtered)
+        : 0;
+      if (filtered && childCount === 0) continue;  // 无未审后代：整目录隐藏
+      rendered += childCount;
       wrap.appendChild(children);
       row.addEventListener('click', (e) => {
         if (e.target.closest('.tree-row__actions')) return;
@@ -104,6 +220,7 @@ function renderNodes(nodes, container) {
         } catch (err) { reportError(err); }
       });
     } else {
+      rendered += 1;
       row.addEventListener('click', (e) => {
         if (e.target.closest('.tree-row__actions')) return;
         if (node.type === 'note') emit('open-note', node.path);
@@ -115,6 +232,7 @@ function renderNodes(nodes, container) {
     }
     container.appendChild(wrap);
   }
+  return rendered;
 }
 
 function toggleDir(path, childrenEl, iconEl) {

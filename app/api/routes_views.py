@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.api import deps
 from app.views import ViewStore, build_schema, normalize_definition, run_query
+from app.vault.provenance import LOCAL_UI_ACTOR
 from app.views.query import cached_snapshot
 from app.views.schema import schema_for_prompt
 
@@ -195,7 +196,9 @@ async def update_cell(req: CellRequest):
     else:
         frontmatter[key] = value
 
-    result = vault.write_note(req.path, content=note["content"], frontmatter=frontmatter)
+    result = vault.write_note(
+        req.path, content=note["content"], frontmatter=frontmatter, actor=LOCAL_UI_ACTOR
+    )
     from app.views.query import invalidate_cache
 
     invalidate_cache()

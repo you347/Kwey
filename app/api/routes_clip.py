@@ -38,8 +38,12 @@ from pydantic import BaseModel, Field
 from app.api import deps
 from app.parser.frontmatter import parse_frontmatter
 from app.paths import AppPaths, PathError, normalize_rel, sanitize_filename
+from app.vault.provenance import ActorContext
 
 router = APIRouter(prefix="/api/clip", tags=["clip"])
+
+# 浏览器剪藏是 Kwey 抓取/转换写入，不是人工逐字编辑。
+CLIP_ACTOR = ActorContext(kind="system", name="kwey-clip", origin="clip")
 
 MAX_BYTES = 2 * 1024 * 1024          # 响应上限 2MB
 FETCH_TIMEOUT = 10.0                 # 秒
@@ -726,7 +730,7 @@ async def clip_url(req: ClipRequest) -> Dict[str, Any]:
             frontmatter["tags"] = merged_tags
         else:
             frontmatter.pop("tags", None)
-        vault.write_note(existing, body, frontmatter)
+        vault.write_note(existing, body, frontmatter, actor=CLIP_ACTOR)
         return {
             "code": 0,
             "data": {
@@ -748,6 +752,7 @@ async def clip_url(req: ClipRequest) -> Dict[str, Any]:
         note_rel,
         content=body,
         frontmatter=_build_frontmatter(title, final_url, tags, clipped),
+        actor=CLIP_ACTOR,
     )
     return {
         "code": 0,

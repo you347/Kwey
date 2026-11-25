@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.api import deps
 from app.models import CreateDirRequest, CreateNoteRequest, MoveRequest, RenameRequest
 from app.paths import normalize_rel, sanitize_filename
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -25,7 +26,7 @@ async def create_note(req: CreateNoteRequest):
     if not name.lower().endswith(MARKDOWN_EXTS):
         name += ".md"
     rel = _join(req.dir, name)
-    meta = vault.create_note(rel, dedup=True)
+    meta = vault.create_note(rel, dedup=True, actor=LOCAL_UI_ACTOR)
     return {"code": 0, "data": meta, "message": "ok"}
 
 

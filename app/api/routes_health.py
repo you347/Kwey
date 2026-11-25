@@ -17,8 +17,12 @@ from pydantic import BaseModel
 
 from app.api import deps
 from app.diagnose import scan, strip_broken_links
+from app.vault.provenance import ActorContext
 
 router = APIRouter(prefix="/api/diagnose", tags=["diagnose"])
+
+# 知识体检的修复是软件按规则执行，不是人工逐字编辑。
+HEALTH_ACTOR = ActorContext(kind="system", name="kwey-health", origin="local-ui-fix")
 
 
 def _config() -> Dict[str, Any]:
@@ -71,7 +75,7 @@ async def fix(req: FixRequest):
             if not targets:
                 continue
             try:
-                changed, _content = strip_broken_links(vault, path, targets)
+                changed, _content = strip_broken_links(vault, path, targets, actor=HEALTH_ACTOR)
                 if changed:
                     fixed.append(path)
             except Exception as exc:  # noqa: BLE001
@@ -94,7 +98,9 @@ async def fix(req: FixRequest):
                     continue
                 tags.append(tag)
                 fm["tags"] = tags
-                vault.write_note(path, content=note["content"], frontmatter=fm)
+                vault.write_note(
+                    path, content=note["content"], frontmatter=fm, actor=HEALTH_ACTOR
+                )
                 fixed.append(path)
             except Exception as exc:  # noqa: BLE001
                 errors.append({"path": path, "error": str(exc)})

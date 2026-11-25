@@ -25,6 +25,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from app.parser.frontmatter import parse_frontmatter
 from app.parser.wikilink import extract_wikilinks
 from app.paths import AppPaths
+from app.vault.provenance import LOCAL_UI_ACTOR
 
 MARKDOWN_EXTS = {".md", ".markdown"}
 ATTACHMENT_EXTS = {
@@ -234,10 +235,14 @@ class VaultImporter:
                         raw = path.read_text(encoding="utf-8", errors="replace")
                         frontmatter, body = parse_frontmatter(raw)
                         if action == "overwrite":
-                            self.vault.write_note(target, body, frontmatter)
+                            self.vault.write_note(
+                                target, body, frontmatter, actor=LOCAL_UI_ACTOR
+                            )
                             notes_overwritten += 1
                         else:
-                            self.vault.create_note(target, body, frontmatter)
+                            self.vault.create_note(
+                                target, body, frontmatter, actor=LOCAL_UI_ACTOR
+                            )
                             if action == "rename":
                                 notes_renamed += 1
                             else:

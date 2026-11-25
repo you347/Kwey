@@ -292,7 +292,13 @@ def _find_duplicates(root: Path, notes: List[Dict], cfg: Dict[str, Any]) -> List
 _BROKEN_LINK_RE = re.compile(r"(!?)\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]")
 
 
-def strip_broken_links(vault, rel: str, broken_targets: Iterable[str]) -> Tuple[bool, str]:
+def strip_broken_links(
+    vault,
+    rel: str,
+    broken_targets: Iterable[str],
+    *,
+    actor=None,
+) -> Tuple[bool, str]:
     """把断链 ``[[x]]`` 降级为纯文本（有别名保留别名）。返回 (改动?, 新正文)。"""
     note = vault.read_note(rel)
     targets = {str(t).strip() for t in broken_targets if str(t).strip()}
@@ -311,5 +317,7 @@ def strip_broken_links(vault, rel: str, broken_targets: Iterable[str]) -> Tuple[
 
     new_content = _BROKEN_LINK_RE.sub(replace, note["content"])
     if changed["flag"]:
-        vault.write_note(rel, content=new_content, frontmatter=note["frontmatter"])
+        vault.write_note(
+            rel, content=new_content, frontmatter=note["frontmatter"], actor=actor
+        )
     return changed["flag"], new_content

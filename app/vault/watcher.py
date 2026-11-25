@@ -127,6 +127,9 @@ class VaultWatcher:
 
         existed = service.db.get_note(rel) is not None
         if is_md:
+            # 自写去重已通过：此处只核对溯源基线，命中外部变化则记事件/状态，
+            # 绝不重写外部文件；未知旧文件无基线，保持 unknown。
+            service.record_external_change(rel)
             service.indexer.reindex_note(rel)
         else:
             service.indexer.linkgraph.upsert_file(rel)
