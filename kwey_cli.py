@@ -9,9 +9,11 @@
     echo "正文" | python kwey_cli.py write --vault "D:/我的知识库" notes/管道.md --stdin
     python kwey_cli.py tree   --vault "D:/我的知识库"
     python kwey_cli.py export --vault "D:/我的知识库" notes/读书/2026计划.md --format html --out D:/tmp/plan.html
+    cat session.json | python kwey_cli.py session distill --vault "D:/我的知识库" --stdin --preview --json
 
 设计约束：
-- 标准库 argparse；子命令 search / read / write / tree / export；**不实现 serve**（与 main.py 重复）。
+- 标准库 argparse；子命令 search / read / write / tree / export / session（离线预览）；
+  **不实现 serve**（与 main.py 重复）。
 - 直接 ``deps.init_services(root, open_now=True)`` 后调服务层；与 REST/MCP/UI 同一事实源。
 - **写必须经 VaultService**（统一写路径：原子写 + 增量索引 + 事件广播），禁止直接 open()/write_text()。
   （唯一例外：``export --out`` 写 vault 外的导出文件，以及 ``export md`` 为与 /api/export 保持
@@ -213,12 +215,49 @@ def _cmd_export(args: argparse.Namespace) -> Dict[str, Any]:
     return {"path": rel, "format": args.format, "filename": filename, "content": content}
 
 
+def _cmd_session(args: argparse.Namespace) -> Dict[str, Any]:
+    """session distill：离线预览标准会话输入的候选槽位（纯计算）。
+
+    - 只接受 ``--stdin`` + ``--preview``；不创建草案/笔记、不启动服务、不宣称已入队；
+    - 输出候选、来源、遗漏与 preview_hash（无 draft_id，重复生成不承诺确定一致）；
+    - 需要持久待审草案请用 MCP ``kwey.session.distill``（幂等返回 draft_id）。
+    """
+    from app.agent.session_distill import DistillError, preview
+
+    if args.session_command != "distill":
+        raise CliError(f"未知 session 子命令: {args.session_command}", code=2)
+    if getattr(args, "submit", False):
+        raise CliError(
+            "--submit 暂未提供：CLI 不启动服务，无法确认持久提交事务；"
+            "请用 MCP kwey.session.distill 获取 draft_id",
+            code=2,
+        )
+    if not args.preview:
+        raise CliError(
+            "当前仅支持离线预览（--preview）；持久待审草案请用 MCP kwey.session.distill，"
+            "CLI 不启动服务也不宣称已入队",
+            code=2,
+        )
+    if not args.stdin:
+        raise CliError("session distill 需要 --stdin 读取标准 JSON 输入", code=2)
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CliError(f"--stdin 不是合法 JSON: {exc}", code=2) from exc
+    try:
+        return preview(payload)
+    except DistillError as exc:
+        raise CliError(f"会话输入校验失败: {exc}", code=1) from exc
+
+
 HANDLERS: Dict[str, Callable[[argparse.Namespace], Dict[str, Any]]] = {
     "search": _cmd_search,
     "read": _cmd_read,
     "write": _cmd_write,
     "tree": _cmd_tree,
     "export": _cmd_export,
+    "session": _cmd_session,
 }
 
 
@@ -270,6 +309,28 @@ def _emit_human(args: argparse.Namespace, data: Dict[str, Any]) -> None:
         else:
             content = data["content"]
             sys.stdout.write(content if content.endswith("\n") else content + "\n")
+    elif command == "session":
+        stats = data["stats"]
+        print(
+            f"会话蒸馏离线预览（未持久化）：{stats['events']} 事件 / "
+            f"{stats['total_candidates']} 条候选 / {stats['omissions']} 条遗漏"
+        )
+        labels = {
+            "decisions": "决策",
+            "constraints": "约束",
+            "refutations": "证伪",
+            "open_items": "未完成",
+            "knowledge_candidates": "知识候选",
+        }
+        for slot, label in labels.items():
+            items = data["candidates"].get(slot) or []
+            print(f"[{label}] {len(items)}")
+            for item in items:
+                print(f"  - {item['text']}  ({', '.join(item['source_event_ids'])})")
+        if data.get("omissions"):
+            print(f"[遗漏] {len(data['omissions'])} 条（详见 --json）")
+        print(f"preview_hash: {data['preview_hash']}")
+        print("未创建草案 / 笔记，未入队。")
 
 
 # --------------------------------------------------------------------- parser
@@ -335,6 +396,29 @@ def build_parser() -> argparse.ArgumentParser:
     sp_export.add_argument("--out", help="输出文件路径（必须在 vault 之外）；缺省写到 stdout")
     _add_shared_args(sp_export)
 
+    sp_session = sub.add_parser(
+        "session", help="跨 Agent 会话蒸馏（离线预览；持久草案请用 MCP）",
+        description="session distill --stdin --preview：校验标准 JSON 并输出六类槽位候选、"
+                    "来源、遗漏与 preview_hash；不创建草案/笔记、不启动服务、不入队。",
+    )
+    _add_shared_args(sp_session)
+    sess_sub = sp_session.add_subparsers(dest="session_command", metavar="子命令", required=True)
+    sp_distill = sess_sub.add_parser(
+        "distill", help="离线预览会话蒸馏候选（--stdin --preview --json）",
+        description="读取标准会话 JSON（schema_version/source/events），只输出待审候选与 "
+                    "preview_hash，不落盘。",
+    )
+    sp_distill.add_argument("--stdin", action="store_true", help="从 stdin 读取标准 JSON 输入")
+    sp_distill.add_argument(
+        "--preview", action="store_true",
+        help="离线预览（当前唯一模式；不产生 draft_id，不入队）",
+    )
+    sp_distill.add_argument(
+        "--submit", action="store_true",
+        help="持久提交（暂未提供；请用 MCP kwey.session.distill）",
+    )
+    _add_shared_args(sp_distill)
+
     return parser
 
 
@@ -355,7 +439,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         # 全量建索引；不启动 watcher 线程（同 kwey_mcp.py 的 stdio 场景取舍）。
-        deps.init_services(root, open_now=True)
+        # session distill --preview 是纯计算，连索引都不建（不在 vault 落任何控制文件）。
+        offline = args.command == "session" and getattr(args, "preview", False)
+        if not offline:
+            deps.init_services(root, open_now=True)
         data = HANDLERS[args.command](args)
     except HTTPException as exc:
         print(f"[kwey-cli] 错误 [{exc.status_code}]: {exc.detail}", file=sys.stderr)
