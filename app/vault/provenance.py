@@ -360,6 +360,11 @@ def raw_hash(raw: str) -> str:
     return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
 
 
+def raw_bytes_hash(data: bytes) -> str:
+    """磁盘原始字节的 SHA-256（纯文本/二进制写回用，避免编码往返造成误判）。"""
+    return hashlib.sha256(data or b"").hexdigest()
+
+
 # ---------------------------------------------------------------------- 派生状态
 def _entry_kind(entry: Mapping[str, Any]) -> str:
     kind = _clean_text(entry.get("writer_kind")).lower()
@@ -624,6 +629,63 @@ class ProvenanceStore:
                 "at": entry["recorded_at"],
                 "raw_hash": entry["raw_hash"],
                 "payload_hash": entry["payload_hash"],
+                "writer_kind": ctx.kind,
+                "last_writer": ctx.display_name,
+                "run_id": ctx.run_id,
+            })
+            self._evict_baselines_locked()
+            self._save_locked()
+            return copy.deepcopy(entry)
+
+    def record_write_bytes(
+        self,
+        path: str,
+        data: bytes,
+        actor: Optional[ActorContext] = None,
+        *,
+        action: str = "write_text",
+        generated: bool = False,
+    ) -> Dict[str, Any]:
+        """纯文本/二进制写回的基线：raw 与 payload 都用字节 SHA-256。
+
+        非 Markdown 文件没有 frontmatter 语义，按字节比对能精确识别「外部改过」，
+        也不会因为 UTF-8/GBK 解码往返被误判为变化。
+        """
+        rel = self._normalize_path(path)
+        ctx = actor or UNKNOWN_ACTOR
+        with self._lock:
+            data_store = self._load_locked()
+            previous = data_store["baselines"].get(rel)
+            previous = previous if isinstance(previous, dict) else {}
+            generated_value = (
+                bool(generated) or ctx.is_agent or _as_bool(previous.get("generated"))
+            )
+            digest = raw_bytes_hash(data)
+            version = PAYLOAD_SERIALIZATION_VERSION
+            entry: Dict[str, Any] = {
+                "path": rel,
+                "raw_hash": digest,
+                "payload_hash": digest,
+                "payload_version": version,
+                "hash_kind": "bytes",
+                "writer_kind": ctx.kind,
+                "last_writer": ctx.display_name,
+                "origin": ctx.origin,
+                "run_id": ctx.run_id,
+                "generated": generated_value,
+                "recorded_at": _now_iso(),
+                "action": action,
+                "reviewed_at": None,
+                "reviewed_hash": None,
+                "reviewed_version": None,
+            }
+            data_store["baselines"][rel] = entry
+            self._append_event_locked({
+                "action": action,
+                "path": rel,
+                "at": entry["recorded_at"],
+                "raw_hash": digest,
+                "payload_hash": digest,
                 "writer_kind": ctx.kind,
                 "last_writer": ctx.display_name,
                 "run_id": ctx.run_id,

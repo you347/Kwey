@@ -6,6 +6,7 @@ import { api } from './api.js';
 import { state, on } from './state.js';
 import { $, escapeHtml } from './utils.js';
 import * as editor from './editor.js';
+import { isPlainPath } from './viewer.js';
 
 let initialized = false;
 let currentPath = null;   // 最近一次 tab-activated 的笔记路径
@@ -54,6 +55,11 @@ export async function refreshOutline(path) {
   if (!box) return;
   if (!path) {
     box.innerHTML = '<div class="panel-empty">未打开笔记</div>';
+    return;
+  }
+  if (isPlainPath(path)) {
+    // 纯文本/CSV 不是 Markdown，服务端不会解析标题
+    box.innerHTML = '<div class="panel-empty">纯文本文件无大纲</div>';
     return;
   }
   try {

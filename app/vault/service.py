@@ -22,7 +22,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from fastapi import HTTPException
 
@@ -60,9 +60,45 @@ from app.vault.provenance import (
 )
 
 MARKDOWN_EXTS = {".md", ".markdown"}
+# 允许纯文本编辑（不注入 frontmatter、按原编码/换行写回）的格式
+PLAIN_TEXT_EXTS = {".txt", ".text", ".log", ".csv", ".tsv"}
 TRASH_ROOT = ".trash"  # 回收站根目录（vault 相对，IGNORED_DIRS 内）
 
 logger = logging.getLogger("kwey.vault")
+
+
+def detect_text_storage(data: bytes) -> Tuple[str, bool, str]:
+    """探测纯文本存储：返回 (编码, 是否带 BOM, 换行符)。"""
+    has_bom = data.startswith(b"\xef\xbb\xbf")
+    try:
+        data.decode("utf-8-sig") if has_bom else data.decode("utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        try:
+            data.decode("gb18030")
+            encoding = "gb18030"
+        except UnicodeDecodeError:
+            encoding = "utf-8"
+
+    crlf = data.count(b"\r\n")
+    lf = data.count(b"\n") - crlf
+    cr = data.count(b"\r") - crlf
+    if crlf and crlf >= lf and crlf >= cr:
+        newline = "\r\n"
+    elif cr and cr > lf:
+        newline = "\r"
+    else:
+        newline = "\n"
+    return encoding, has_bom, newline
+
+
+def encode_text_storage(content: str, encoding: str, has_bom: bool, newline: str) -> bytes:
+    """按原文件的编码/BOM/换行写回，避免无谓的整文件 diff。"""
+    text = content.replace("\r\n", "\n").replace("\r", "\n")
+    if newline != "\n":
+        text = text.replace("\n", newline)
+    data = text.encode(encoding)
+    return b"\xef\xbb\xbf" + data if has_bom else data
 
 
 def _validate(rel: str) -> str:
@@ -428,6 +464,91 @@ class VaultService:
                 "updated": True,
                 "links_changed": links_changed,
                 "mtime": abs_path.stat().st_mtime,
+            }
+
+    # ------------------------------------------------------------------ plain text
+    @staticmethod
+    def _require_plain_path(rel: str, abs_path: Path) -> None:
+        if abs_path.suffix.lower() not in PLAIN_TEXT_EXTS:
+            raise HTTPException(
+                status_code=415,
+                detail=f"该格式不支持纯文本编辑: {rel.rsplit('/', 1)[-1]}",
+            )
+        if not abs_path.is_file():
+            raise HTTPException(status_code=404, detail=f"文件不存在: {rel}")
+
+    def read_plain_text(self, rel: str) -> Dict[str, Any]:
+        """纯文本/CSV 读取：返回正文与存储编码、BOM、换行，供编辑器无损回写。"""
+        with self.lock:
+            rel = _validate(rel)
+            abs_path = self.paths.to_abs(rel)
+            self._require_plain_path(rel, abs_path)
+            data = abs_path.read_bytes()
+            encoding, has_bom, newline = detect_text_storage(data)
+            try:
+                content = data.decode("utf-8-sig" if has_bom else encoding)
+            except UnicodeDecodeError:
+                content = data.decode(encoding, errors="replace")
+            return {
+                "path": rel,
+                "content": content,
+                "encoding": encoding,
+                "bom": has_bom,
+                "newline": newline,
+                "mtime": abs_path.stat().st_mtime,
+                "size": len(data),
+                "format": abs_path.suffix.lower().lstrip("."),
+            }
+
+    def write_plain_text(
+        self,
+        rel: str,
+        content: str,
+        base_mtime: Optional[float] = None,
+        *,
+        actor: Optional[ActorContext] = None,
+    ) -> Dict[str, Any]:
+        """纯文本/CSV 写回：不注入 frontmatter，沿用原编码/BOM/换行原子落盘。"""
+        with self.lock:
+            rel = _validate(rel)
+            abs_path = self.paths.to_abs(rel)
+            self._require_plain_path(rel, abs_path)
+
+            disk_mtime = abs_path.stat().st_mtime
+            if base_mtime is not None and abs(disk_mtime - float(base_mtime)) > 1e-6:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"文件已被外部修改（mtime 冲突），请刷新后重试: {rel}",
+                )
+
+            encoding, has_bom, newline = detect_text_storage(abs_path.read_bytes())
+            try:
+                data = encode_text_storage(content, encoding, has_bom, newline)
+            except UnicodeEncodeError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"内容含无法用 {encoding} 编码保存的字符",
+                ) from exc
+
+            self._atomic_write_bytes(abs_path, data)
+            self._mark_self_write(rel)
+            ctx = resolve_actor(actor)
+            if ctx.kind == "unknown":
+                ctx = SYSTEM_ACTOR
+            try:
+                self.provenance.record_write_bytes(rel, data, ctx, action="write_text")
+            except Exception:  # noqa: BLE001 —— 溯源失败不阻断写盘
+                logger.warning("溯源基线记录失败（不影响写盘）: %s", rel, exc_info=True)
+            self.indexer.reindex_attachment(rel)
+            self.eventbus.publish(VaultEvent(EventType.UPDATED, path=rel))
+            self._auto_snapshot("update", rel)
+            return {
+                "updated": True,
+                "mtime": abs_path.stat().st_mtime,
+                "encoding": encoding,
+                "bom": has_bom,
+                "newline": newline,
+                "size": len(data),
             }
 
     def write_raw(

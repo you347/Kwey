@@ -149,6 +149,8 @@ async function startVaultUI() {
     on('open-note', (path) => tabs.openTab(path).catch(reportError));
     // 非 md 文件：只读预览，不进入编辑态
     on('open-file', (path) => { if (path) viewer.open(path).catch(reportError); });
+    // txt/csv：从预览切到纯文本编辑（不注入 frontmatter）
+    on('edit-plain', (path) => { if (path) tabs.openTab(path).catch(reportError); });
     on('viewer-closed', () => showNoNote());
     // 智能体「打开文件夹 / 定位附件」：切到文件树并展开定位
     on('open-folder', (payload) => {
@@ -299,11 +301,14 @@ async function createConflictCopy(path, content, frontmatter) {
 async function loadNote(path) {
   hideConflict();
   viewer.close();
+  if (viewer.isPlainPath(path)) return loadPlainNote(path);
   try {
     const doc = await api.get('/api/note', { path });
     state.doc = doc;
     $('#editor-area').classList.remove('hidden');
+    $('#editor-area').removeAttribute('data-plain');
     $('#empty-state').classList.add('hidden');
+    applyEditorMode(state.editorMode);
     $('#note-title').textContent = doc.title;
     shell.setStatusPath(path);
     editor.setValue(doc.content);
@@ -328,10 +333,60 @@ async function loadNote(path) {
   }
 }
 
+/**
+ * txt/csv 纯文本装载：强制源码模式，隐藏属性/预览/溯源（无 frontmatter 语义）。
+ * 保存走 /api/plain-file，按原编码与换行写回。
+ */
+async function loadPlainNote(path) {
+  hideConflict();
+  try {
+    const doc = await api.get('/api/plain-file', { path });
+    state.doc = {
+      path,
+      title: basename(path),
+      content: doc.content,
+      frontmatter: {},
+      mtime: doc.mtime,
+      plain: true,
+      encoding: doc.encoding,
+      bom: doc.bom,
+      newline: doc.newline,
+    };
+    const area = $('#editor-area');
+    area.classList.remove('hidden');
+    area.setAttribute('data-plain', 'true');
+    area.dataset.mode = 'source';
+    $all('#mode-switch .btn--mini').forEach((b) => b.classList.toggle('btn--active', b.dataset.mode === 'source'));
+    $('#empty-state').classList.add('hidden');
+    $('#note-title').textContent = basename(path);
+    shell.setStatusPath(path);
+    editor.setValue(doc.content);
+    properties.clearProperties();
+    preview.clearPreview();
+    backlinks.refreshBacklinks(null);
+    provenance.clear();
+    freshness.clear();
+    tabs.refreshTabTitle(path, basename(path));
+    tabs.setDirty(false);
+    setSaveState('');
+    updateWordCount();
+    editor.focus();
+  } catch (err) {
+    if (err.code === 404) {
+      toast(`文件不存在: ${path}（已从标签页移除）`, 'error');
+      tabs.closeTab(path);
+      emit('tree-refresh');
+    } else {
+      reportError(err);
+    }
+  }
+}
+
 function showNoNote() {
   hideConflict();
   viewer.close();
   state.doc = null;
+  $('#editor-area')?.removeAttribute('data-plain');
   shell.setStatusPath('');
   $('#editor-area').classList.add('hidden');
   $('#empty-state').classList.remove('hidden');
@@ -374,7 +429,7 @@ function renderEmptyRecent() {
 
 /** 用 state.doc 当前正文（可能尚未落盘）渲染预览。 */
 function refreshPreview() {
-  if (state.doc && state.editorMode !== 'source') {
+  if (state.doc && !state.doc.plain && state.editorMode !== 'source') {
     preview.renderPreview(state.doc.path, state.doc.content);
   }
 }
@@ -403,6 +458,7 @@ const previewDebounced = debounce(() => { refreshPreview(); }, 600);
 async function saveNote(manual) {
   if (!state.doc) return;
   const content = editor.getValue();
+  if (state.doc.plain) return savePlainNote(content, manual);
   try {
     const result = await api.put('/api/note', {
       path: state.doc.path,
@@ -439,6 +495,37 @@ async function saveNote(manual) {
   }
 }
 
+/** txt/csv 保存：纯文本写回，不碰 frontmatter、不刷新预览/溯源。 */
+async function savePlainNote(content, manual) {
+  try {
+    const result = await api.put('/api/plain-file', {
+      path: state.doc.path,
+      content,
+      base_mtime: state.doc.mtime,
+    });
+    state.doc.mtime = result.mtime;
+    state.doc.content = content;
+    const path = state.doc.path;
+    lastLocalWrite = { path, ts: Date.now() };
+    setTimeout(() => {
+      if (lastLocalWrite && lastLocalWrite.path === path) lastLocalWrite = null;
+    }, 800);
+    tabs.setDirty(false);
+    hideConflict();
+    setSaveState('已保存');
+    if (manual) toast('已保存', 'success', 1500);
+  } catch (err) {
+    if (err.code === 409) {
+      showConflict(state.doc.path);
+      setSaveState('保存冲突');
+      toast('磁盘内容已更新，请选择重新载入或另存副本', 'error');
+    } else {
+      reportError(err);
+      setSaveState('保存失败');
+    }
+  }
+}
+
 async function saveFrontmatter(newFm) {
   if (!state.doc) return;
   try {
@@ -462,13 +549,18 @@ async function saveFrontmatter(newFm) {
 }
 
 /* ------------------------------------------------------------------ 模式/主题 */
-function setEditorMode(mode) {
+function applyEditorMode(mode) {
   state.editorMode = mode;
   const area = $('#editor-area');
   if (area) area.dataset.mode = mode;
   $all('#mode-switch .btn--mini').forEach((b) => b.classList.toggle('btn--active', b.dataset.mode === mode));
   if (mode !== 'source') refreshPreview();
   else editor.preserveCursor();
+}
+
+function setEditorMode(mode) {
+  if (state.doc && state.doc.plain) return;  // 纯文本只支持源码视图
+  applyEditorMode(mode);
   settings.saveSettings({ editor_mode: mode });
 }
 
@@ -534,7 +626,7 @@ function handleWsEvent(msg) {
       if (oldPath) tabs.renameTab(oldPath, path);
       break;
     case 'updated':
-      if (path === state.activePath) {
+      if (path === state.activePath && !(state.doc && state.doc.plain)) {
         provenance.invalidate(path);
         provenance.refresh(path).catch(() => {});
       }

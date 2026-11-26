@@ -7,6 +7,17 @@ import { $, basename } from './utils.js';
 let currentPath = null;
 let currentReq = 0;
 
+/** 可写回的纯文本格式：与服务端 PLAIN_TEXT_EXTS 保持一致。 */
+const PLAIN_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv']);
+
+/** 是否纯文本/CSV（走 /api/plain-file 编辑，不注入 frontmatter）。 */
+export function isPlainPath(path) {
+  const name = String(path || '');
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return false;
+  return PLAIN_EXTS.has(name.slice(dot + 1).toLowerCase());
+}
+
 /** 逐段 encodeURIComponent，避免中文/空格路径拼坏。 */
 function fileUrl(path) {
   return '/file/' + String(path).split('/').map(encodeURIComponent).join('/');
@@ -31,6 +42,9 @@ function reset() {
 
 export function initViewer() {
   $('#file-viewer-close')?.addEventListener('click', () => close(true));
+  $('#file-viewer-edit')?.addEventListener('click', () => {
+    if (currentPath) emit('edit-plain', currentPath);
+  });
   $('#file-viewer-reload')?.addEventListener('click', () => {
     if (currentPath) open(currentPath, { refresh: true }).catch(reportError);
   });
@@ -49,6 +63,7 @@ export function close(notify = false) {
   reset();
   const meta = $('#file-viewer-meta');
   if (meta) meta.textContent = '';
+  $('#file-viewer-edit')?.classList.add('hidden');
   if (notify) emit('viewer-closed');
 }
 
@@ -77,6 +92,7 @@ export async function open(path, { refresh = false } = {}) {
   }
   if (raw) raw.href = url;
   setMeta('加载中…');
+  $('#file-viewer-edit')?.classList.add('hidden');
 
   const body = $('#file-viewer-body');
   body.innerHTML = '';
@@ -92,6 +108,9 @@ export async function open(path, { refresh = false } = {}) {
     if (req !== currentReq) return;
     body.innerHTML = '';
     setMeta(`${(data.format || '').toUpperCase()} · ${formatSize(data.size)}${data.cached ? ' · 缓存' : ''}`);
+    if (data.kind === 'html' && PLAIN_EXTS.has(String(data.format || '').toLowerCase())) {
+      $('#file-viewer-edit')?.classList.remove('hidden');
+    }
 
     if (data.kind === 'html') {
       const holder = document.createElement('div');

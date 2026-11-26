@@ -84,6 +84,12 @@
   background: #fff;
 }
 
+/* ---- 纯文本编辑态：无预览/属性语义，隐藏模式切换与双屏 ---- */
+#editor-area[data-plain="true"] #mode-switch,
+#editor-area[data-plain="true"] #btn-split-toggle {
+  display: none;
+}
+
 /* ---- 转换出的文档片段 ---- */
 .kwey-doc {
   max-width: 900px;

@@ -8,6 +8,7 @@ import { api, reportError } from './api.js';
 import { state, emit } from './state.js';
 import { basename, stripMd, copyPath, $ } from './utils.js';
 import { showContextMenu } from './contextmenu.js';
+import { isPlainPath } from './viewer.js';
 
 const LS_KEY = 'kwey.tabs.v1';
 let tabsEl = null;
@@ -199,7 +200,7 @@ async function restore() {
   if (!saved || !Array.isArray(saved.tabs)) return;
   for (const path of saved.tabs) {
     try {
-      await api.get('/api/note', { path });
+      await api.get(isPlainPath(path) ? '/api/plain-file' : '/api/note', { path });
       await openTab(path, { activate: false });
     } catch { /* 笔记已不存在则跳过 */ }
   }
@@ -220,7 +221,7 @@ export async function restoreSecondaryTabs() {
   if (!sec || !Array.isArray(sec.tabs) || !sec.tabs.length) return false;
   for (const path of sec.tabs) {
     try {
-      await api.get('/api/note', { path });
+      await api.get(isPlainPath(path) ? '/api/plain-file' : '/api/note', { path });
       await openTabIn('secondary', path, { activate: false });
     } catch { /* 笔记已不存在则跳过 */ }
   }

@@ -81,6 +81,13 @@ class Indexer:
         return count
 
     # ------------------------------------------------------------------ single
+    def reindex_attachment(self, rel: str) -> None:
+        """非笔记附件的增量索引：登记文件名，供嵌入与后续附件全文索引使用。"""
+        rel = normalize_rel(rel)
+        if is_ignored(rel):
+            return
+        self.linkgraph.upsert_file(rel)
+
     def reindex_note(self, rel: str, broadcast: bool = True) -> bool:
         """单文件增量索引。返回链接关系是否发生变化（links_changed 判定）。
 

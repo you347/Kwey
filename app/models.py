@@ -60,6 +60,14 @@ class NoteUpdateRequest(BaseModel):
     base_mtime: Optional[float] = None  # 乐观锁：不符返回 409
 
 
+class PlainFileUpdateRequest(BaseModel):
+    """纯文本/CSV 写回：无 frontmatter，按原编码/BOM/换行落盘。"""
+
+    path: str
+    content: str = ""
+    base_mtime: Optional[float] = None  # 乐观锁：不符返回 409
+
+
 class CreateNoteRequest(BaseModel):
     dir: str = ""
     name: str
