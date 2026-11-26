@@ -81,11 +81,37 @@
 }
 
 .file-viewer__image {
-  max-width: 100%;
-  max-height: calc(100vh - 160px);
-  object-fit: contain;
   display: block;
   margin: 0 auto;
+}
+.file-viewer__image.is-fit {
+  max-width: 100%;
+  max-height: calc(100vh - 230px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.file-viewer__image.is-free {
+  max-width: none;
+  max-height: none;
+}
+.file-viewer__imagebar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 4px 0;
+  background: var(--bg);
+}
+.file-viewer__zoom {
+  min-width: 46px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .file-viewer__pdf {
