@@ -21,6 +21,11 @@ function icon(id) {
   return `<svg class="icon" aria-hidden="true"><use href="#${id}"/></svg>`;
 }
 
+/** 图片缩略图地址（服务端会做格式转换/消毒）。 */
+function thumbUrl(path) {
+  return '/api/preview/thumb?path=' + encodeURIComponent(path);
+}
+
 export function initFiletree() {
   treeEl = $('#filetree');
   const filterBtn = $('#btn-unreviewed-filter');
@@ -172,9 +177,24 @@ function renderNodes(nodes, container, filtered = false) {
 
     const iconEl = document.createElement('span');
     iconEl.className = 'tree-row__icon';
-    iconEl.innerHTML = icon(node.type === 'dir'
-      ? (expandedDirs.has(node.path) ? 'i-folder-open' : 'i-folder')
-      : (node.type === 'note' ? 'i-file' : 'i-download'));
+    if (node.type === 'image') {
+      // 图片行用缩略图代替通用文件图标；加载失败（无解码器）时回退文件图标
+      iconEl.classList.add('tree-row__icon--thumb');
+      const thumb = document.createElement('img');
+      thumb.className = 'tree-row__thumb';
+      thumb.loading = 'lazy';
+      thumb.alt = '';
+      thumb.src = thumbUrl(node.path);
+      thumb.addEventListener('error', () => {
+        iconEl.classList.remove('tree-row__icon--thumb');
+        iconEl.innerHTML = icon('i-file');
+      }, { once: true });
+      iconEl.appendChild(thumb);
+    } else {
+      iconEl.innerHTML = icon(node.type === 'dir'
+        ? (expandedDirs.has(node.path) ? 'i-folder-open' : 'i-folder')
+        : (node.type === 'note' ? 'i-file' : 'i-download'));
+    }
     const name = document.createElement('span');
     name.className = 'tree-row__name';
     name.textContent = node.name;
@@ -184,7 +204,7 @@ function renderNodes(nodes, container, filtered = false) {
     buildActions(actions, node);
     row.appendChild(iconEl);
     row.appendChild(name);
-    if (node.type !== 'note' && node.index_state) {
+    if (node.type !== 'note' && node.type !== 'image' && node.index_state) {
       const badge = document.createElement('span');
       badge.className = 'tree-row__badge';
       badge.textContent = '未全索引';
