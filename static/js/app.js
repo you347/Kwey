@@ -53,6 +53,7 @@ import { initDuty } from './duty.js';
 import * as provenance from './provenance.js';
 import * as freshness from './freshness.js';
 import * as viewer from './viewer.js';
+import * as csvtable from './csvtable.js';
 
 let autosaveRunner = null;
 let wsClosed = null;
@@ -115,6 +116,10 @@ async function setupEditor() {
   await editor.initEditor($('#editor-source'), handleEditorInput);
   editor.onCursor(shell.setStatusCursor);
   editor.enableLinkHints();
+  csvtable.initCsvTable({
+    onChange: handleCsvTableChange,
+    onRequestMode: handlePlainModeRequest,
+  });
   splitview.initSplitView();
 }
 
@@ -148,7 +153,11 @@ async function startVaultUI() {
     on('tab-activated', (path) => { if (path) loadNote(path); else showNoNote(); });
     on('open-note', (path) => tabs.openTab(path).catch(reportError));
     // 非 md 文件：只读预览，不进入编辑态
-    on('open-file', (path) => { if (path) viewer.open(path).catch(reportError); });
+    on('open-file', (path) => {
+      if (!path) return;
+      csvtable.close();
+      viewer.open(path).catch(reportError);
+    });
     // txt/csv：从预览切到纯文本编辑（不注入 frontmatter）
     on('edit-plain', (path) => { if (path) tabs.openTab(path).catch(reportError); });
     on('viewer-closed', () => showNoNote());
@@ -301,6 +310,7 @@ async function createConflictCopy(path, content, frontmatter) {
 async function loadNote(path) {
   hideConflict();
   viewer.close();
+  csvtable.close();
   if (viewer.isPlainPath(path)) return loadPlainNote(path);
   try {
     const doc = await api.get('/api/note', { path });
@@ -351,6 +361,7 @@ async function loadPlainNote(path) {
       encoding: doc.encoding,
       bom: doc.bom,
       newline: doc.newline,
+      format: doc.format,
     };
     const area = $('#editor-area');
     area.classList.remove('hidden');
@@ -361,6 +372,13 @@ async function loadPlainNote(path) {
     $('#note-title').textContent = basename(path);
     shell.setStatusPath(path);
     editor.setValue(doc.content);
+    const tableView = csvtable.open(doc);
+    if (!tableView) {
+      csvtable.close();
+      if ((doc.format === 'csv' || doc.format === 'tsv') && doc.table_reason) {
+        toast(doc.table_reason, 'info', 2800);
+      }
+    }
     properties.clearProperties();
     preview.clearPreview();
     backlinks.refreshBacklinks(null);
@@ -370,7 +388,8 @@ async function loadPlainNote(path) {
     tabs.setDirty(false);
     setSaveState('');
     updateWordCount();
-    editor.focus();
+    if (tableView) $('#csv-table .csv-table__cell')?.focus();
+    else editor.focus();
   } catch (err) {
     if (err.code === 404) {
       toast(`文件不存在: ${path}（已从标签页移除）`, 'error');
@@ -385,6 +404,7 @@ async function loadPlainNote(path) {
 function showNoNote() {
   hideConflict();
   viewer.close();
+  csvtable.close();
   state.doc = null;
   $('#editor-area')?.removeAttribute('data-plain');
   shell.setStatusPath('');
@@ -455,9 +475,33 @@ function handleEditorInput(content) {
 
 const previewDebounced = debounce(() => { refreshPreview(); }, 600);
 
+/** 表格单元格/行列变化：序列化成文本后复用源码编辑的脏标记与自动保存链路。 */
+function handleCsvTableChange(text) {
+  if (!state.doc || !state.doc.plain) return;
+  handleEditorInput(text);
+}
+
+/** CSV/TSV 视图切换：表格 ↔ 源码；源码无法无损解析时留在源码并提示。 */
+function handlePlainModeRequest(next) {
+  if (!state.doc || !state.doc.plain) return;
+  if (next === 'table') {
+    if (!csvtable.parseInto(editor.getValue())) {
+      toast('当前内容无法无损解析为表格，已保留源码模式', 'error');
+      return;
+    }
+    csvtable.setMode('table');
+    $('#csv-table .csv-table__cell')?.focus();
+    return;
+  }
+  if (csvtable.isActive()) editor.setValue(csvtable.getText());
+  csvtable.setMode('source');
+  editor.refresh();
+  editor.focus();
+}
+
 async function saveNote(manual) {
   if (!state.doc) return;
-  const content = editor.getValue();
+  const content = state.doc.plain && csvtable.isTableMode() ? csvtable.getText() : editor.getValue();
   if (state.doc.plain) return savePlainNote(content, manual);
   try {
     const result = await api.put('/api/note', {
@@ -800,7 +844,10 @@ function setSaveState(text) {
 }
 
 function updateWordCount() {
-  const n = wordCount(editor.getValue());
+  const text = state.doc && state.doc.plain && csvtable.isTableMode()
+    ? csvtable.getText()
+    : editor.getValue();
+  const n = wordCount(text);
   $('#status-words').textContent = `字数 ${n}`;
 }
 

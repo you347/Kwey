@@ -247,6 +247,10 @@
               <button data-mode="split" class="btn btn--mini">分屏</button>
               <button data-mode="preview" class="btn btn--mini">预览</button>
             </div>
+            <div class="mode-switch" id="plain-mode-switch">
+              <button data-plain-mode="table" class="btn btn--mini" type="button" title="按表格编辑 CSV/TSV">表格</button>
+              <button data-plain-mode="source" class="btn btn--mini" type="button" title="按源码编辑">源码</button>
+            </div>
             <button id="btn-split-toggle" class="btn btn--ghost btn--split" title="两篇笔记对照编辑 (Ctrl+Shift+S)" aria-pressed="false">
               <svg class="icon" aria-hidden="true"><use href="#i-columns"/></svg> 双屏
             </button>
@@ -275,6 +279,7 @@
                 placeholder="使用 Markdown 书写… 支持 [[双链]]、[[目标|别名]]、![[嵌入]]、#标签"></textarea>
             </div>
           </div>
+          <div id="csv-table" class="csv-table hidden"></div>
           <div id="editor-preview" class="preview-pane markdown-body"></div>
           </div>
           <div id="split-resizer" class="split-resizer hidden" title="拖动调整分屏比例"></div>

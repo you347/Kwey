@@ -42,6 +42,7 @@ from app.paths import (
     validate_relative,
 )
 from app.vault.links import LinkRewriter
+from app.viewers.table import build_table
 from app.vault.provenance import (
     ActorContext,
     FIELD_GENERATED,
@@ -485,20 +486,36 @@ class VaultService:
             self._require_plain_path(rel, abs_path)
             data = abs_path.read_bytes()
             encoding, has_bom, newline = detect_text_storage(data)
+            lossy = False
             try:
                 content = data.decode("utf-8-sig" if has_bom else encoding)
             except UnicodeDecodeError:
                 content = data.decode(encoding, errors="replace")
-            return {
+                lossy = True
+            ext = abs_path.suffix.lower()
+            result: Dict[str, Any] = {
                 "path": rel,
                 "content": content,
                 "encoding": encoding,
                 "bom": has_bom,
                 "newline": newline,
+                "lossy": lossy,
                 "mtime": abs_path.stat().st_mtime,
                 "size": len(data),
-                "format": abs_path.suffix.lower().lstrip("."),
+                "format": ext.lstrip("."),
             }
+            if ext in {".csv", ".tsv"}:
+                # 表格模型只读派生：无损往返校验失败的格式由前端退回源码编辑
+                table = None if lossy else build_table(content, ext)
+                result["table"] = table
+                result["table_reason"] = ""
+                if table is None:
+                    result["table_reason"] = (
+                        "文件编码无法严格解码，已退回源码编辑"
+                        if lossy
+                        else "无法无损解析为表格（引号/换行/分隔符不规则），已退回源码编辑"
+                    )
+            return result
 
     def write_plain_text(
         self,
