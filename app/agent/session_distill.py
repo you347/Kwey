@@ -249,16 +249,123 @@ def validate_payload(payload: Any) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------- 提取
-# 中文句读可零宽切分；ASCII 句点/问号/感叹号/分号后必须有空白才算句末，
-# 否则 ".kwey"、"v1.2"、"a@b.com" 这类点号会被误当句末拆出碎片。
-_SENTENCE_SPLIT_RE = re.compile(r"[\n\r]+|(?<=[。！？；])|(?<=[.!?;])\s+")
+# 切句规则（规则版，宁少断不错断）：
+# - 换行、中文句读（。！？；）直接断句；
+# - ASCII 标点（.!?;）后跟空白即断句；紧随另一个 ASCII 标点时视为连写（"..." / "?!"），
+#   在连写结束处再判；
+# - 无空格直接接下一段（"First.Second"）默认断句，但以下 token 内不断：
+#   路径/文件名（以点开头如 ".kwey"、带已知扩展名如 "config.yml"）、版本号（"v1.2"、"3.14"）、
+#   邮箱/域名（"a@b.com"）、常见缩写（"e.g."、"i.e."、"etc."）。
+_CJK_TERMINALS = "。！？；"
+_ASCII_TERMINALS = ".!?;"
+_CLOSERS = "\"')]”’」』"
+_TOKEN_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-."
+)
+_ABBREVIATIONS = {
+    "e.g", "i.e", "etc", "vs", "cf", "al", "fig", "no", "mr", "mrs", "ms",
+    "dr", "prof", "st", "approx", "resp", "eg", "ie", "approx.",
+}
+_TOKEN_TAILS = {
+    # 文件扩展名 / 常见顶级域：点后命中则视为同一 token
+    "md", "markdown", "txt", "py", "js", "ts", "tsx", "jsx", "json", "yaml",
+    "yml", "toml", "ini", "cfg", "conf", "ico", "png", "jpg", "jpeg", "gif",
+    "svg", "pdf", "html", "htm", "css", "csv", "db", "log", "sh", "ps1", "exe",
+    "zip", "com", "org", "net", "io", "cn", "dev", "ai", "app",
+}
+_VERSION_RE = re.compile(r"[vV]?\d+(?:\.\d+)*")
+
+
+def _scan_token_back(text: str, index: int) -> str:
+    start = index
+    while start > 0 and text[start - 1] in _TOKEN_CHARS:
+        start -= 1
+    return text[start:index]
+
+
+def _scan_token_forward(text: str, index: int) -> str:
+    end = index + 1
+    while end < len(text) and text[end] in _TOKEN_CHARS:
+        end += 1
+    return text[index + 1:end]
+
+
+def _keeps_token(text: str, index: int) -> bool:
+    """点号是否属于同一 token（路径/版本/域名/缩写），是则不在此处断句。"""
+    prev_token = _scan_token_back(text, index)
+    next_token = _scan_token_forward(text, index)
+    if not prev_token:
+        # ".kwey"：点号位于 token 起始，按路径片段处理
+        return True
+    if "@" in prev_token or "@" in next_token:
+        return True
+    if _VERSION_RE.fullmatch(prev_token):
+        return True
+    if prev_token.isdigit() and next_token[:1].isdigit():
+        return True
+    if next_token.lower() in _TOKEN_TAILS or prev_token.lower() in _TOKEN_TAILS:
+        return True
+    if prev_token.lower() in _ABBREVIATIONS:
+        return True
+    # "e.g" / "i.e"：首个点号前后都是单字母，按缩写链处理
+    if len(prev_token) == 1 and prev_token.islower() and re.match(r"[A-Za-z]\.", next_token):
+        return True
+    return False
+
+
+def _is_sentence_end(text: str, index: int) -> bool:
+    nxt = text[index + 1] if index + 1 < len(text) else ""
+    if nxt and nxt in _ASCII_TERMINALS:
+        return False  # "..." / "?!": 由连写末尾统一判定
+    prev_token = _scan_token_back(text, index)
+    if not nxt or nxt.isspace() or nxt in _CLOSERS:
+        return prev_token.lower().rstrip(".") not in _ABBREVIATIONS
+    if nxt.isalnum() or nxt in "_-":
+        return not _keeps_token(text, index)
+    return True
+
+
+def _split_sentences(text: str) -> List[str]:
+    out: List[str] = []
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "\r\n":
+            out.append(text[start:i])
+            i += 1
+            start = i
+            continue
+        if ch in _CJK_TERMINALS:
+            j = i + 1
+            while j < n and (text[j] in _CJK_TERMINALS or text[j] in _ASCII_TERMINALS):
+                j += 1
+            while j < n and text[j] in _CLOSERS:
+                j += 1
+            out.append(text[start:j])
+            i = j
+            start = j
+            continue
+        if ch in _ASCII_TERMINALS and _is_sentence_end(text, i):
+            j = i + 1
+            while j < n and text[j] in _CLOSERS:
+                j += 1
+            out.append(text[start:j])
+            while j < n and text[j] in " \t":
+                j += 1
+            i = j
+            start = j
+            continue
+        i += 1
+    out.append(text[start:])
+    return out
 
 
 def _sentences(text: str) -> List[str]:
     """按行与中英文句读切分；保留原顺序，过滤过短片段。"""
-    parts = _SENTENCE_SPLIT_RE.split(text)
     out: List[str] = []
-    for part in parts:
+    for part in _split_sentences(text):
         clean = re.sub(r"\s+", " ", part).strip()
         if len(clean) < 4:
             continue

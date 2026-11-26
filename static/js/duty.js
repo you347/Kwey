@@ -780,12 +780,21 @@ function stopPolling() {
   pollTimer = null;
 }
 
-function hasActiveRuns() {
-  return dt.runs.some((r) => r && (r.status === 'queued' || r.status === 'running'));
+function needsRunRefresh() {
+  return dt.runs.some((run) => {
+    if (!run) return false;
+    if (run.status === 'queued' || run.status === 'running') return true;
+    // 待审提案可能在别处被批准/拒绝：刷新到提案出现终态为止。
+    if (run.status === 'awaiting_review' && run.proposalId) {
+      const status = dt.runProposalStatus.get(run.proposalId) || 'pending';
+      return status === 'pending';
+    }
+    return false;
+  });
 }
 
 function startRunPolling() {
-  if (runPollTimer || !hasActiveRuns()) return;
+  if (runPollTimer || !needsRunRefresh()) return;
   runPollTimer = setInterval(() => {
     if (!dt.open || dt.tab !== 'runs' || dt.detail || document.visibilityState !== 'visible') {
       stopRunPolling();
@@ -794,7 +803,7 @@ function startRunPolling() {
     loadRuns(null, { silent: true })
       .catch(() => {})
       .finally(() => {
-        if (!hasActiveRuns()) stopRunPolling();
+        if (!needsRunRefresh()) stopRunPolling();
       });
   }, RUN_POLL_MS);
 }
@@ -1550,6 +1559,39 @@ function runRow(run) {
   return row;
 }
 
+function captureRunsFocus() {
+  if (!dom || !dom.body) return null;
+  const active = document.activeElement;
+  const state = { scrollTop: dom.body.scrollTop, kind: null, id: null };
+  if (!active || !dom.body.contains(active)) return state;
+  if (active.dataset && active.dataset.runProposal) {
+    state.kind = 'proposal';
+    state.id = active.dataset.runProposal;
+  } else if (active.id === 'duty-runs-more') {
+    state.kind = 'more';
+  }
+  return state;
+}
+
+function restoreRunsFocus(state) {
+  if (!dom || !dom.body || !state) return;
+  dom.body.scrollTop = state.scrollTop || 0;
+  let target = null;
+  if (state.kind === 'proposal' && state.id) {
+    const selector = `[data-run-proposal="${String(state.id).replace(/"/g, '\\"')}"]`;
+    target = dom.body.querySelector(selector);
+  } else if (state.kind === 'more') {
+    target = dom.body.querySelector('#duty-runs-more');
+  }
+  if (target && typeof target.focus === 'function') {
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      target.focus();
+    }
+  }
+}
+
 async function fetchRunProposalStatuses(items = []) {
   const ids = new Set(items.map((r) => r.proposalId).filter(Boolean));
   const map = new Map();
@@ -1586,8 +1628,13 @@ async function loadRuns(cursor = null, { append = false, silent = false } = {}) 
     }
   } finally {
     dt.loading.runs = false;
-    if (!dt.detail) render();
-    if (dt.open && dt.tab === 'runs' && !dt.detail && hasActiveRuns()) startRunPolling();
+    if (!dt.detail) {
+      // 轮询是静默整表重绘：重绘前记住焦点与滚动位置，重绘后原样还回去。
+      const keep = silent ? captureRunsFocus() : null;
+      render();
+      if (silent) restoreRunsFocus(keep);
+    }
+    if (dt.open && dt.tab === 'runs' && !dt.detail && needsRunRefresh()) startRunPolling();
     else stopRunPolling();
   }
 }
@@ -1647,7 +1694,7 @@ function selectTab(id) {
   if (id !== 'runs') stopRunPolling();
   render();
   loadTab({ force: dt.tab === 'proposals' && dt.proposalsLoaded });
-  if (id === 'runs' && hasActiveRuns()) startRunPolling();
+  if (id === 'runs' && needsRunRefresh()) startRunPolling();
 }
 
 async function toggleDuty(id) {

@@ -216,6 +216,36 @@ class TestSentenceSplitting:
 
         assert _sentences("先定方案。再补测试。") == ["先定方案。", "再补测试。"]
 
+    def test_no_space_english_sentences_are_split(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("First.Second") == ["First.", "Second"]
+
+    def test_version_and_decimal_are_not_split(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("升级到 v1.2 后正常") == ["升级到 v1.2 后正常"]
+        assert _sentences("大概 3.14 左右") == ["大概 3.14 左右"]
+
+    def test_paths_files_and_domains_are_not_split(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("不要动 .kwey 目录") == ["不要动 .kwey 目录"]
+        assert _sentences("改 config.yml 就行") == ["改 config.yml 就行"]
+        assert _sentences("访问 a.com 首页") == ["访问 a.com 首页"]
+
+    def test_abbreviations_do_not_end_sentence(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("Use e.g. this style.") == ["Use e.g. this style."]
+        assert _sentences("比如 i.e. 换个说法") == ["比如 i.e. 换个说法"]
+
+    def test_ellipsis_and_combined_terminators(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("Done... Next.") == ["Done...", "Next."]
+        assert _sentences("真的吗？！继续处理。") == ["真的吗？！", "继续处理。"]
+
     def test_no_evidence_candidates_are_dropped(self):
         doc = validate_payload(_payload())
         extracted = extract(doc)
