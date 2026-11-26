@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from app.paths import AppPaths
-from app.viewers import render
+from app.viewers import images, render
 from app.viewers.extract import (
     IMAGE_EXTS,
     MAX_TEXT_CHARS,
@@ -134,7 +134,28 @@ def preview_file(paths: AppPaths, rel: str, *, refresh: bool = False) -> Dict[st
         "size": size,
     }
     if ext in IMAGE_EXTS:
-        return {**base, "kind": "image"}
+        # 图片不参与全文索引：显式标注「不适用」，避免文件树出现未索引角标
+        index_status = {"state": "not_applicable", "detail": "图片不参与全文索引"}
+        try:
+            images.image_display_path(abs_path, preview_cache_dir(paths))
+        except images.ImageConversionError as exc:
+            return {
+                **base,
+                "kind": "unsupported",
+                "degraded": True,
+                "reason": f"该图片格式暂不支持应用内预览（{exc}）；可下载后用本地应用查看。",
+                "index_status": index_status,
+            }
+        width, height = images.image_size(abs_path) or (None, None)
+        return {
+            **base,
+            "kind": "image",
+            "width": width,
+            "height": height,
+            "converted": ext in images.CONVERT_IMAGE_EXTS,
+            "svg": ext == ".svg",
+            "index_status": index_status,
+        }
     if ext in PDF_EXTS:
         return {**base, "kind": "pdf"}
     if ext not in SUPPORTED_EXTS:

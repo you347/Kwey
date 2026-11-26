@@ -22,7 +22,21 @@ TEXT_EXTS = {
     ".yml", ".ini", ".toml", ".xml", ".conf", ".env", ".sql", ".py", ".js",
     ".ts", ".css", ".html", ".htm", ".sh", ".ps1",
 }
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".ico", ".svg"}
+IMAGE_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".avif",
+    ".ico",
+    ".svg",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+}
 PDF_EXTS = {".pdf"}
 OFFICE_EXTS = {".docx", ".xlsx", ".xls", ".doc"}
 SUPPORTED_EXTS = TEXT_EXTS | IMAGE_EXTS | PDF_EXTS | OFFICE_EXTS

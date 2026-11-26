@@ -289,6 +289,16 @@ class TestPreviewApi:
         assert resp.headers["content-disposition"].startswith("attachment")
         assert resp.headers["x-content-type-options"] == "nosniff"
 
+    def test_file_endpoint_non_ascii_name_keeps_attachment_header(self, client, vault):
+        """中文文件名不能进 latin-1 响应头，需降级 ASCII 并附 filename*（RFC 5987）。"""
+        root = vault.paths.ensure_root()
+        (root / "危险.svg").write_text("<svg></svg>", encoding="utf-8")
+        resp = client.get("/file/危险.svg")
+        assert resp.status_code == 200
+        disposition = resp.headers["content-disposition"]
+        assert disposition.startswith("attachment")
+        assert "filename*=UTF-8''" in disposition
+
     def test_file_endpoint_size_cap(self, client, vault, monkeypatch):
         from app.api import routes_system
 

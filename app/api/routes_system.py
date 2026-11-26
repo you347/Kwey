@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -122,7 +123,12 @@ def _serve_vault_file(raw_rel: str) -> FileResponse:
     media_type = mimetypes.guess_type(abs_path.name)[0] or "application/octet-stream"
     headers = {"X-Content-Type-Options": "nosniff"}
     if abs_path.suffix.lower() in _FORCE_DOWNLOAD_EXTS:
-        headers["Content-Disposition"] = f'attachment; filename="{abs_path.name}"'
+        # 响应头只能 latin-1：非 ASCII 文件名需走 RFC 5987 的 filename*，否则构造响应时 500
+        ascii_stem = abs_path.stem.encode("ascii", "ignore").decode().strip()
+        ascii_name = f"{ascii_stem}{abs_path.suffix}" if ascii_stem else f"download{abs_path.suffix}"
+        headers["Content-Disposition"] = (
+            f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(abs_path.name)}'
+        )
     return FileResponse(str(abs_path), media_type=media_type, headers=headers)
 
 

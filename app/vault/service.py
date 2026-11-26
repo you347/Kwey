@@ -42,6 +42,7 @@ from app.paths import (
     validate_relative,
 )
 from app.vault.links import LinkRewriter
+from app.viewers.extract import IMAGE_EXTS
 from app.viewers.table import build_table
 from app.vault.provenance import (
     ActorContext,
@@ -945,7 +946,13 @@ class VaultService:
                         {"name": p.name, "path": rel, "type": "dir", "children": build(rel)}
                     )
                 else:
-                    kind = "note" if p.suffix.lower() in MARKDOWN_EXTS else "file"
+                    suffix = p.suffix.lower()
+                    if suffix in MARKDOWN_EXTS:
+                        kind = "note"
+                    elif suffix in IMAGE_EXTS:
+                        kind = "image"
+                    else:
+                        kind = "file"
                     entry: Dict[str, Any] = {"name": p.name, "path": rel, "type": kind}
                     status = statuses.get(rel)
                     if status and status.get("state") not in (None, "indexed"):
