@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/css/panels.css"/>
   <link rel="stylesheet" href="/static/css/shell.css"/>
   <link rel="stylesheet" href="/static/css/editor.css"/>
+  <link rel="stylesheet" href="/static/css/viewer.css"/>
   <link rel="stylesheet" href="/static/css/splash.css"/>
   <link rel="stylesheet" href="/static/css/slides.css?v=1"/>
   <link rel="stylesheet" href="/static/css/settings-ui.css"/>
@@ -305,6 +306,20 @@
             <kbd>Ctrl</kbd>+<kbd>O</kbd> 快速切换 · <kbd>Ctrl</kbd>+<kbd>P</kbd> 命令面板 · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 搜索
           </p>
         </div>
+      </div>
+
+      <div id="file-viewer" class="file-viewer hidden">
+        <div class="file-viewer__bar">
+          <span id="file-viewer-name" class="file-viewer__name"></span>
+          <span id="file-viewer-meta" class="file-viewer__meta"></span>
+          <span class="file-viewer__actions">
+            <button id="file-viewer-reload" class="btn btn--mini btn--ghost" type="button" title="重新转换">刷新</button>
+            <a id="file-viewer-raw" class="btn btn--mini btn--ghost" href="#" target="_blank" rel="noopener">新窗口</a>
+            <a id="file-viewer-download" class="btn btn--mini" href="#" download>下载</a>
+            <button id="file-viewer-close" class="btn btn--mini btn--ghost" type="button">关闭</button>
+          </span>
+        </div>
+        <div id="file-viewer-body" class="file-viewer__body"></div>
       </div>
 
       <div id="empty-state" class="empty-state hidden">

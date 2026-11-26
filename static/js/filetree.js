@@ -224,6 +224,7 @@ function renderNodes(nodes, container, filtered = false) {
       row.addEventListener('click', (e) => {
         if (e.target.closest('.tree-row__actions')) return;
         if (node.type === 'note') emit('open-note', node.path);
+        else emit('open-file', node.path);
       });
       row.draggable = true;
       row.addEventListener('dragstart', (e) => {
@@ -339,11 +340,27 @@ function nodeMenuItems(node) {
     ];
   }
   const items = [
-    { label: '打开', icon: 'i-file', run: () => emit('open-note', node.path) },
+    node.type === 'note'
+      ? { label: '打开', icon: 'i-file', run: () => emit('open-note', node.path) }
+      : { label: '预览', icon: 'i-file', run: () => emit('open-file', node.path) },
     { label: '作为对话上下文', icon: 'i-spark', run: () => emit('chat-context', { path: node.path, kind: 'note' }) },
   ];
   if (node.type === 'note') {
     items.push({ label: '在右屏打开', icon: 'i-panel-right', run: () => emit('open-in-pane', { pane: 'secondary', path: node.path }) });
+  } else {
+    items.push({
+      label: '下载',
+      icon: 'i-download',
+      run: () => {
+        const url = '/file/' + node.path.split('/').map(encodeURIComponent).join('/');
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = node.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      },
+    });
   }
   items.push(
     { sep: true },

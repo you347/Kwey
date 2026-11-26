@@ -1,0 +1,183 @@
+/* 只读预览查看器：占据编辑区，不进入编辑态。 */
+
+.file-viewer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  background: var(--bg);
+}
+
+.file-viewer.hidden {
+  display: none;
+}
+
+.file-viewer__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+
+.file-viewer__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer__meta {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.file-viewer__actions a.btn {
+  text-decoration: none;
+}
+
+.file-viewer__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 28px 48px;
+}
+
+.file-viewer__hint {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  padding: 8px 0;
+}
+
+.file-viewer__hint--error {
+  color: var(--broken);
+}
+
+.file-viewer__image {
+  max-width: 100%;
+  max-height: calc(100vh - 160px);
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.file-viewer__pdf {
+  width: 100%;
+  height: calc(100vh - 150px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* ---- 转换出的文档片段 ---- */
+.kwey-doc {
+  max-width: 900px;
+  margin: 0 auto;
+  color: var(--text);
+  font-size: var(--font-editor);
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.kwey-doc h1,
+.kwey-doc h2,
+.kwey-doc h3,
+.kwey-doc h4 {
+  line-height: 1.35;
+  margin: 1.2em 0 0.5em;
+}
+
+.kwey-doc h3 {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+
+.kwey-doc p {
+  margin: 0.6em 0;
+}
+
+.kwey-doc ul,
+.kwey-doc ol {
+  padding-left: 1.6em;
+  margin: 0.6em 0;
+}
+
+.kwey-doc blockquote {
+  margin: 0.8em 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.kwey-doc pre {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.kwey-doc code {
+  background: var(--bg-alt);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+}
+
+.kwey-doc__plain {
+  white-space: pre-wrap;
+  font-family: ui-monospace, Consolas, 'Cascadia Code', monospace;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.kwey-doc__table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: var(--fs-sm);
+}
+
+.kwey-doc__table th,
+.kwey-doc__table td {
+  border: 1px solid var(--border-strong);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.kwey-doc__table thead th {
+  background: var(--bg-panel);
+  position: sticky;
+  top: 0;
+}
+
+.kwey-doc__note {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  margin: 8px 0 0;
+}
+
+.kwey-doc img {
+  max-width: 100%;
+}

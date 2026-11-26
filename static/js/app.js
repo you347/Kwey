@@ -52,6 +52,7 @@ import { initInbox } from './inbox.js';
 import { initDuty } from './duty.js';
 import * as provenance from './provenance.js';
 import * as freshness from './freshness.js';
+import * as viewer from './viewer.js';
 
 let autosaveRunner = null;
 let wsClosed = null;
@@ -66,6 +67,7 @@ async function bootstrap() {
   shell.initShell();
   provenance.initProvenance();
   freshness.initFreshness();
+  viewer.initViewer();
   bindStaticButtons();
   registerCommands();
   bindGlobalKeys();
@@ -145,6 +147,9 @@ async function startVaultUI() {
     // 事件订阅先于标签恢复（restore 期间会 emit tab-activated）
     on('tab-activated', (path) => { if (path) loadNote(path); else showNoNote(); });
     on('open-note', (path) => tabs.openTab(path).catch(reportError));
+    // 非 md 文件：只读预览，不进入编辑态
+    on('open-file', (path) => { if (path) viewer.open(path).catch(reportError); });
+    on('viewer-closed', () => showNoNote());
     // 智能体「打开文件夹 / 定位附件」：切到文件树并展开定位
     on('open-folder', (payload) => {
       const path = typeof payload === 'string' ? payload : payload && payload.path;
@@ -293,6 +298,7 @@ async function createConflictCopy(path, content, frontmatter) {
 /* ------------------------------------------------------------------ 笔记装载 */
 async function loadNote(path) {
   hideConflict();
+  viewer.close();
   try {
     const doc = await api.get('/api/note', { path });
     state.doc = doc;
@@ -324,6 +330,7 @@ async function loadNote(path) {
 
 function showNoNote() {
   hideConflict();
+  viewer.close();
   state.doc = null;
   shell.setStatusPath('');
   $('#editor-area').classList.add('hidden');

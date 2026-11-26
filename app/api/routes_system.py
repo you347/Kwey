@@ -97,6 +97,12 @@ async def upload_attachment(file: UploadFile = File(...)):
 static_router = APIRouter(tags=["static"])
 
 
+# 静态直出上限：超大文件不允许整包塞进浏览器内存，也不允许拖垮 WebView
+MAX_SERVE_BYTES = 200 * 1024 * 1024
+# 这些类型直接内联会在应用 origin 里执行脚本（SVG/HTML），强制下载
+_FORCE_DOWNLOAD_EXTS = {".svg", ".html", ".htm", ".xhtml", ".xml"}
+
+
 def _serve_vault_file(raw_rel: str) -> FileResponse:
     vault = deps.require_vault()
     rel_norm = normalize_rel(raw_rel)
@@ -107,8 +113,17 @@ def _serve_vault_file(raw_rel: str) -> FileResponse:
     abs_path = vault.paths.to_abs(rel)
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {rel}")
+    size = abs_path.stat().st_size
+    if size > MAX_SERVE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件超过 {MAX_SERVE_BYTES // (1024 * 1024)}MB，请用本地应用打开",
+        )
     media_type = mimetypes.guess_type(abs_path.name)[0] or "application/octet-stream"
-    return FileResponse(str(abs_path), media_type=media_type)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if abs_path.suffix.lower() in _FORCE_DOWNLOAD_EXTS:
+        headers["Content-Disposition"] = f'attachment; filename="{abs_path.name}"'
+    return FileResponse(str(abs_path), media_type=media_type, headers=headers)
 
 
 @static_router.get("/file/{file_path:path}", include_in_schema=False)

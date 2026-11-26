@@ -110,6 +110,7 @@ def create_app(
     from app.api.routes_trash import router as trash_router
     from app.api.routes_templates import router as templates_router
     from app.api.routes_export import router as export_router
+    from app.api.routes_preview import router as preview_router
     from app.api.ws import router as ws_router
     # ---- M2 Agent Link（四卡并行产出，统一在此注册） ----
     from app.api.routes_agent import router as agent_router
@@ -152,6 +153,7 @@ def create_app(
     app.include_router(trash_router)
     app.include_router(templates_router)
     app.include_router(export_router)
+    app.include_router(preview_router)
     app.include_router(ws_router)
     app.include_router(agent_router)
     app.include_router(organize_router)
