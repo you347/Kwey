@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import os
 import shutil
 import subprocess
 import tempfile
@@ -197,10 +199,36 @@ class DocConversionError(RuntimeError):
     pass
 
 
-def doc_to_html(abs_path: Path) -> str:
+# 转换缓存版本：转换逻辑变化时 +1，使旧 docx 缓存自动失效
+DOC_CACHE_VERSION = 1
+
+
+def convert_doc_to_docx(abs_path: Path, cache_dir: Optional[Path] = None) -> Path:
+    """把 .doc 转成 .docx 并缓存；命中缓存直接复用（按路径+mtime+大小+版本为键）。
+
+    缓存目录由调用方传入（预览统一用 ``<vault>/.kwey/previews``，可整库删除重建）。
+    """
     soffice = find_soffice()
     if not soffice:
-        raise DocConversionError("未检测到 LibreOffice")
+        raise DocConversionError("未检测到 LibreOffice/soffice（.doc 转换所需）")
+
+    stat = abs_path.stat()
+    if cache_dir is None:
+        cache_dir = Path(tempfile.gettempdir()) / "kwey-doc-cache"
+    target_dir = Path(cache_dir) / "doc"
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        target_dir = Path(tempfile.gettempdir()) / "kwey-doc-cache" / "doc"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+    key = hashlib.sha1(
+        f"{abs_path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{DOC_CACHE_VERSION}".encode("utf-8")
+    ).hexdigest()
+    cached = target_dir / f"{key}.docx"
+    if cached.is_file() and cached.stat().st_size > 0:
+        return cached
+
     with tempfile.TemporaryDirectory(prefix="kwey-doc-") as tmp:
         try:
             proc = subprocess.run(
@@ -215,4 +243,18 @@ def doc_to_html(abs_path: Path) -> str:
         if proc.returncode != 0 or not converted.is_file():
             detail = (proc.stderr or b"").decode("utf-8", "replace")[:200]
             raise DocConversionError(f"LibreOffice 转换失败: {detail or '无输出文件'}")
-        return docx_to_html(converted)
+        try:
+            tmp_target = cached.with_name(cached.name + ".tmp")
+            shutil.copyfile(converted, tmp_target)
+            os.replace(tmp_target, cached)
+        except OSError:
+            # 缓存目录不可写时仍返回一份可用的 docx（放系统临时目录）
+            fallback = Path(tempfile.gettempdir()) / f"kwey-doc-{key}.docx"
+            shutil.copyfile(converted, fallback)
+            return fallback
+    return cached
+
+
+def doc_to_html(abs_path: Path, cache_dir: Optional[Path] = None) -> str:
+    converted = convert_doc_to_docx(abs_path, cache_dir)
+    return docx_to_html(converted)

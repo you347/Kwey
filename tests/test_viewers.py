@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -164,7 +165,47 @@ class TestPreviewFormats:
         data = preview_file(paths, "老文档.doc")
         assert data["kind"] == "unsupported"
         assert data["degraded"] is True
-        assert "LibreOffice" in data["reason"]
+        assert "LibreOffice" in data["reason"] and "下载" in data["reason"]
+
+
+class TestDocConversion:
+    def test_convert_caches_docx(self, tmp_path: Path, monkeypatch):
+        import app.viewers.render as render
+
+        source = tmp_path / "old.doc"
+        source.write_bytes(b"fake-doc")
+        cache = tmp_path / "cache"
+        calls = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            calls["n"] += 1
+            outdir = Path(cmd[cmd.index("--outdir") + 1])
+            _make_docx(outdir / "old.docx", "缓存正文")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        monkeypatch.setattr(render, "find_soffice", lambda: "soffice")
+        monkeypatch.setattr(render.subprocess, "run", fake_run)
+
+        first = render.convert_doc_to_docx(source, cache)
+        second = render.convert_doc_to_docx(source, cache)
+        assert first.is_file() and first == second
+        assert first.parent == cache / "doc"
+        assert calls["n"] == 1
+
+    def test_doc_preview_uses_converted_docx(self, paths: AppPaths, sample_vault: Path, monkeypatch):
+        (sample_vault / "转换.doc").write_bytes(b"fake")
+        import app.viewers.render as render
+
+        def fake_convert(abs_path, cache_dir=None):
+            out = Path(cache_dir) / "doc" / "converted.docx"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _make_docx(out, "转换后的正文")
+            return out
+
+        monkeypatch.setattr(render, "convert_doc_to_docx", fake_convert)
+        data = preview_file(paths, "转换.doc")
+        assert data["kind"] == "html"
+        assert "转换后的正文" in data["html"]
 
 
 # ---------------------------------------------------------------- 消毒

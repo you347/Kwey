@@ -91,6 +91,33 @@ class TestAttachmentIndex:
         hits, total = _search_attachments(vault, "云服务器")
         assert total == 1
 
+    def test_doc_indexed_via_conversion(self, vault, monkeypatch):
+        root = vault.paths.ensure_root()
+        converted = root / "attachments" / "_旧文档.docx"
+        _make_docx(converted, "旧格式索引正文")
+        (root / "attachments" / "旧文档.doc").write_bytes(b"fake-doc")
+
+        import app.viewers.render as render
+        monkeypatch.setattr(render, "find_soffice", lambda: "soffice")
+        monkeypatch.setattr(
+            render, "convert_doc_to_docx", lambda path, cache_dir=None: converted
+        )
+        vault.indexer.reindex_attachment("attachments/旧文档.doc")
+
+        hits, total = _search_attachments(vault, "索引正文")
+        assert total == 1
+        assert hits[0]["path"] == "attachments/旧文档.doc"
+
+    def test_doc_without_libreoffice_skips(self, vault, monkeypatch):
+        root = vault.paths.ensure_root()
+        (root / "attachments" / "无转换.doc").write_bytes(b"fake-doc")
+
+        import app.viewers.render as render
+        monkeypatch.setattr(render, "find_soffice", lambda: None)
+        before = vault.db.count_attachments()
+        vault.indexer.reindex_attachment("attachments/无转换.doc")
+        assert vault.db.count_attachments() == before
+
     def test_pdf_indexed(self, vault):
         reportlab = pytest.importorskip("reportlab.pdfgen.canvas")
         root = vault.paths.ensure_root()

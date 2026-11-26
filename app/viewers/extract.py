@@ -81,6 +81,13 @@ def extract_docx_text(abs_path: Path) -> str:
     return _clip(result.value or "")
 
 
+def extract_doc_text(abs_path: Path, cache_dir=None) -> str:
+    """老 .doc：先经 LibreOffice 转 docx（带缓存），再按 docx 抽取。"""
+    from app.viewers.render import convert_doc_to_docx
+
+    return extract_docx_text(convert_doc_to_docx(abs_path, cache_dir))
+
+
 def extract_xlsx_text(abs_path: Path) -> str:
     from openpyxl import load_workbook
 
@@ -132,8 +139,11 @@ def extract_pdf_text(abs_path: Path) -> str:
     return _clip("\n".join(parts))
 
 
-def extract_text(abs_path: Path) -> str:
-    """按扩展名抽取纯文本；不支持/失败时返回空串（调用方决定降级）。"""
+def extract_text(abs_path: Path, cache_dir=None) -> str:
+    """按扩展名抽取纯文本；不支持/失败时返回空串（调用方决定降级）。
+
+    ``cache_dir`` 供 .doc 的 LibreOffice 转换缓存使用（索引与预览共用）。
+    """
     ext = abs_path.suffix.lower()
     try:
         if ext in {".csv", ".tsv"}:
@@ -141,6 +151,8 @@ def extract_text(abs_path: Path) -> str:
         if ext in TEXT_EXTS:
             text, _enc = decode_text(abs_path.read_bytes())
             return _clip(text)
+        if ext == ".doc":
+            return extract_doc_text(abs_path, cache_dir)
         if ext == ".docx":
             return extract_docx_text(abs_path)
         if ext == ".xlsx":

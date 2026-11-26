@@ -24,7 +24,7 @@ from app.viewers.extract import (
 )
 
 # 渲染逻辑变更时 +1，使旧缓存自动失效
-VIEWER_VERSION = 1
+VIEWER_VERSION = 2
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
 CACHE_DIRNAME = "previews"
 
@@ -148,11 +148,12 @@ def preview_file(paths: AppPaths, rel: str, *, refresh: bool = False) -> Dict[st
 
     if ext == ".doc":
         try:
-            html = render.doc_to_html(abs_path)
+            html = render.doc_to_html(abs_path, preview_cache_dir(paths))
         except render.DocConversionError as exc:
             # 已知格式但缺外部转换器：给出可展示的降级说明（不报 4xx，避免无意义报错）
             reason = (
-                "未检测到 LibreOffice，.doc 暂不支持应用内预览；可下载后用本地应用打开。"
+                "未检测到 LibreOffice/soffice（.doc 转换所需），无法应用内预览或建立全文索引；"
+                "可下载后用本地应用打开，或安装 LibreOffice 后点「刷新」。"
                 if "未检测到" in str(exc)
                 else f".doc 转换失败：{exc}"
             )

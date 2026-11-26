@@ -96,13 +96,21 @@ class Indexer:
             return
         self.linkgraph.upsert_file(rel)
         abs_path = self.paths.to_abs(rel)
-        if abs_path.suffix.lower() not in ATTACHMENT_TEXT_EXTS or not abs_path.is_file():
+        ext = abs_path.suffix.lower()
+        if ext not in ATTACHMENT_TEXT_EXTS or not abs_path.is_file():
             return
         try:
             if abs_path.stat().st_size > MAX_ATTACHMENT_BYTES:
                 self.db.remove_attachment_fts(rel)
                 return
-            text = extract_text(abs_path)
+            if ext == ".doc":
+                # .doc 必须先经 LibreOffice 转 docx；缺转换器时不做无效尝试
+                from app.viewers.render import find_soffice
+
+                if find_soffice() is None:
+                    self.db.remove_attachment_fts(rel)
+                    return
+            text = extract_text(abs_path, self.paths.ensure_root() / ".kwey" / "previews")
         except Exception:  # noqa: BLE001 —— 坏文件不阻断整体索引
             logger.warning("附件文本抽取失败（跳过）: %s", rel, exc_info=True)
             self.db.remove_attachment_fts(rel)
