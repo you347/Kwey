@@ -240,6 +240,46 @@ class TestSentenceSplitting:
         assert _sentences("Use e.g. this style.") == ["Use e.g. this style."]
         assert _sentences("比如 i.e. 换个说法") == ["比如 i.e. 换个说法"]
 
+    def test_dotted_initialisms_are_not_split(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("简称 U.S.A 的写法") == ["简称 U.S.A 的写法"]
+        assert _sentences("这就是 a.k.a. 别名") == ["这就是 a.k.a. 别名"]
+        assert _sentences("下午 3 p.m. 开会") == ["下午 3 p.m. 开会"]
+
+    def test_titles_and_number_prefixes(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("Mr. Smith 说明了") == ["Mr. Smith 说明了"]
+        assert _sentences("Dr.Jones 来了") == ["Dr.Jones 来了"]
+        assert _sentences("见 No.5 号文件") == ["见 No.5 号文件"]
+        assert _sentences("参考 Fig. 3 的图") == ["参考 Fig. 3 的图"]
+
+    def test_multi_letter_dotted_abbreviation(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("他有 Ph.D 学位") == ["他有 Ph.D 学位"]
+
+    def test_plain_word_pair_still_splits(self):
+        from app.agent.session_distill import _sentences
+
+        # 保护表只覆盖已知写法，普通「词.词」仍按句末处理
+        assert _sentences("Hello.World") == ["Hello.", "World"]
+
+    def test_number_prefix_requires_number_after(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("见 No.5 号文件") == ["见 No.5 号文件"]
+        assert _sentences("参考 Vol. IV 的附录") == ["参考 Vol. IV 的附录"]
+        # 普通单词结尾不受编号前缀表影响
+        assert _sentences("这就是 max. Next 继续") == ["这就是 max.", "Next 继续"]
+
+    def test_title_requires_following_capital(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("Mr. Smith 说明了") == ["Mr. Smith 说明了"]
+        assert _sentences("这就是 last. Then 继续") == ["这就是 last.", "Then 继续"]
+
     def test_ellipsis_and_combined_terminators(self):
         from app.agent.session_distill import _sentences
 

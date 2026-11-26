@@ -253,26 +253,50 @@ def validate_payload(payload: Any) -> Dict[str, Any]:
 # - 换行、中文句读（。！？；）直接断句；
 # - ASCII 标点（.!?;）后跟空白即断句；紧随另一个 ASCII 标点时视为连写（"..." / "?!"），
 #   在连写结束处再判；
-# - 无空格直接接下一段（"First.Second"）默认断句，但以下 token 内不断：
-#   路径/文件名（以点开头如 ".kwey"、带已知扩展名如 "config.yml"）、版本号（"v1.2"、"3.14"）、
-#   邮箱/域名（"a@b.com"）、常见缩写（"e.g."、"i.e."、"etc."）。
+# - 无空格直接接下一段（"First.Second"）默认断句，但下列「同一 token」写法不断：
+#   路径/文件名（".kwey"、"config.yml"）、版本号/小数（"v1.2"、"3.14"）、
+#   邮箱/域名（"a@b.com"）、点分首字母缩写（"U.S.A"、"e.g"、"a.k.a"）、
+#   称谓（"Mr."）、编号/图表/章节前缀（"No."、"Fig."）。
+# 保护表集中在下面五组常量里：新增写法只改表，不改判定逻辑。
 _CJK_TERMINALS = "。！？；"
 _ASCII_TERMINALS = ".!?;"
 _CLOSERS = "\"')]”’」』"
 _TOKEN_CHARS = set(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-."
 )
-_ABBREVIATIONS = {
-    "e.g", "i.e", "etc", "vs", "cf", "al", "fig", "no", "mr", "mrs", "ms",
-    "dr", "prof", "st", "approx", "resp", "eg", "ie", "approx.",
-}
-_TOKEN_TAILS = {
-    # 文件扩展名 / 常见顶级域：点后命中则视为同一 token
+
+# 1) 常用拉丁/英文缩写（小写比较，句中不结束句子）
+LATIN_ABBREVIATIONS = frozenset({
+    "e.g", "i.e", "etc", "vs", "cf", "al", "approx", "ibid", "inc", "ltd",
+})
+# 2) 称谓（小写比较）：仅在其后紧跟大写词时保护，避免 "the last. Then" 误并
+TITLES = frozenset({
+    "mr", "mrs", "ms", "messrs", "dr", "prof", "sr", "jr", "st", "rev",
+    "hon", "gen", "col", "lt", "sgt", "capt", "gov", "sen", "rep", "pres",
+})
+# 3) 编号 / 图表 / 章节 / 页码前缀（小写比较）：仅在其后紧跟数字/罗马数字时保护
+NUMBER_PREFIXES = frozenset({
+    "no", "nos", "fig", "figs", "vol", "vols", "ch", "chs", "sec", "secs",
+    "art", "arts", "para", "pp", "p", "eq", "eqs", "ref", "refs", "item",
+    "ver", "ed", "tab",
+})
+_ROMAN_NUMERALS = frozenset({
+    "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x",
+})
+# 4) 正则覆盖不到的多字母点分缩写（小写比较；单字母链走 _INITIALISM_RE）
+DOTTED_ABBREVIATIONS = frozenset({
+    "ph.d", "m.sc", "b.sc", "m.d", "b.a", "m.a",
+})
+# 5) 文件扩展名 / 常见顶级域：点后命中则视为同一 token
+_FILE_TAILS = frozenset({
     "md", "markdown", "txt", "py", "js", "ts", "tsx", "jsx", "json", "yaml",
     "yml", "toml", "ini", "cfg", "conf", "ico", "png", "jpg", "jpeg", "gif",
     "svg", "pdf", "html", "htm", "css", "csv", "db", "log", "sh", "ps1", "exe",
     "zip", "com", "org", "net", "io", "cn", "dev", "ai", "app",
-}
+})
+
+# 点分首字母缩写：单字母 + 点重复（U.S.A / e.g / a.k.a / i.e / p.m）
+_INITIALISM_RE = re.compile(r"[A-Za-z](?:\.[A-Za-z])+")
 _VERSION_RE = re.compile(r"[vV]?\d+(?:\.\d+)*")
 
 
@@ -290,6 +314,42 @@ def _scan_token_forward(text: str, index: int) -> str:
     return text[index + 1:end]
 
 
+def _is_protected_token(token: str) -> bool:
+    """token 是否属于「点号不算句末」的缩写/首字母缩写（无需看后文）。"""
+    if not token:
+        return False
+    core = token.rstrip(".").lower()
+    if core in LATIN_ABBREVIATIONS or core in DOTTED_ABBREVIATIONS:
+        return True
+    return bool(_INITIALISM_RE.fullmatch(token.rstrip(".")))
+
+
+def _is_protected_boundary(prev_token: str, next_token: str) -> bool:
+    """结合后一个词判断：称谓看大写词、编号前缀看数字/罗马数字。"""
+    if _is_protected_token(prev_token):
+        return True
+    core = prev_token.rstrip(".").lower()
+    if core in TITLES:
+        return bool(next_token[:1].isupper())
+    if core in NUMBER_PREFIXES:
+        head = next_token[:1]
+        if head.isdigit():
+            return True
+        return next_token.rstrip(".").lower() in _ROMAN_NUMERALS
+    return False
+
+
+def _next_word(text: str, index: int) -> str:
+    """index 之后跳过空白后的下一个 token（用于「点号 + 空格」分支）。"""
+    j = index + 1
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    end = j
+    while end < len(text) and text[end] in _TOKEN_CHARS:
+        end += 1
+    return text[j:end]
+
+
 def _keeps_token(text: str, index: int) -> bool:
     """点号是否属于同一 token（路径/版本/域名/缩写），是则不在此处断句。"""
     prev_token = _scan_token_back(text, index)
@@ -303,12 +363,12 @@ def _keeps_token(text: str, index: int) -> bool:
         return True
     if prev_token.isdigit() and next_token[:1].isdigit():
         return True
-    if next_token.lower() in _TOKEN_TAILS or prev_token.lower() in _TOKEN_TAILS:
+    if next_token.lower() in _FILE_TAILS or prev_token.lower() in _FILE_TAILS:
         return True
-    if prev_token.lower() in _ABBREVIATIONS:
+    if _is_protected_boundary(prev_token, next_token):
         return True
-    # "e.g" / "i.e"：首个点号前后都是单字母，按缩写链处理
-    if len(prev_token) == 1 and prev_token.islower() and re.match(r"[A-Za-z]\.", next_token):
+    # 跨点拼接后再判：U.S.A / Ph.D 这类单点看不出全貌
+    if _is_protected_token(prev_token + "." + next_token):
         return True
     return False
 
@@ -319,7 +379,7 @@ def _is_sentence_end(text: str, index: int) -> bool:
         return False  # "..." / "?!": 由连写末尾统一判定
     prev_token = _scan_token_back(text, index)
     if not nxt or nxt.isspace() or nxt in _CLOSERS:
-        return prev_token.lower().rstrip(".") not in _ABBREVIATIONS
+        return not _is_protected_boundary(prev_token, _next_word(text, index))
     if nxt.isalnum() or nxt in "_-":
         return not _keeps_token(text, index)
     return True
