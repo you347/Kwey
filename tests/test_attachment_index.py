@@ -91,6 +91,31 @@ class TestAttachmentIndex:
         hits, total = _search_attachments(vault, "云服务器")
         assert total == 1
 
+    def test_xls_indexed(self, vault):
+        xlwt = pytest.importorskip("xlwt")
+        root = vault.paths.ensure_root()
+        book = xlwt.Workbook()
+        sheet = book.add_sheet("旧表")
+        sheet.write(0, 0, "项目")
+        sheet.write(0, 1, "金额")
+        sheet.write(1, 0, "老式服务器")
+        sheet.write(1, 1, 1200)
+        book.save(str(root / "attachments" / "旧预算.xls"))
+
+        vault.indexer.reindex_attachment("attachments/旧预算.xls")
+        hits, total = _search_attachments(vault, "老式服务器")
+        assert total == 1
+        assert hits[0]["path"] == "attachments/旧预算.xls"
+        assert hits[0]["format"] == "xls"
+
+    def test_bad_xls_does_not_break_index(self, vault):
+        root = vault.paths.ensure_root()
+        bad = root / "attachments" / "坏表.xls"
+        bad.write_bytes(b"not-an-excel-file")
+        before = vault.db.count_attachments()
+        vault.indexer.reindex_attachment("attachments/坏表.xls")
+        assert vault.db.count_attachments() == before
+
     def test_doc_indexed_via_conversion(self, vault, monkeypatch):
         root = vault.paths.ensure_root()
         converted = root / "attachments" / "_旧文档.docx"
