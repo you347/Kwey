@@ -30,6 +30,17 @@
 }
 .tree-row__icon { flex: none; width: 16px; text-align: center; font-size: var(--fs-xs); }
 .tree-row__name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree-row__badge {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .tree-row__actions { display: none; gap: 2px; }
 .tree-row:hover .tree-row__actions { display: inline-flex; }
 .tree-row__actions .btn--mini { padding: 0 5px; min-height: 20px; }

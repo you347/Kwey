@@ -184,6 +184,13 @@ function renderNodes(nodes, container, filtered = false) {
     buildActions(actions, node);
     row.appendChild(iconEl);
     row.appendChild(name);
+    if (node.type !== 'note' && node.index_state) {
+      const badge = document.createElement('span');
+      badge.className = 'tree-row__badge';
+      badge.textContent = '未全索引';
+      badge.title = node.index_detail || '该文件未被完整索引；仍可预览与下载';
+      row.appendChild(badge);
+    }
     row.appendChild(actions);
     wrap.appendChild(row);
 

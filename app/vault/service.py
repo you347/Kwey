@@ -924,7 +924,12 @@ class VaultService:
 
     # ------------------------------------------------------------------ tree
     def tree(self) -> List[Dict[str, Any]]:
-        """嵌套文件树（隐藏 .kwey/.trash/.git；目录在前、名称不区分大小写排序）。"""
+        """嵌套文件树（隐藏 .kwey/.trash/.git；目录在前、名称不区分大小写排序）。
+
+        非笔记文件若附件索引未完整建立（超限/截断/缺转换器），附 ``index_state`` /
+        ``index_detail``，供文件树显示「未全索引」角标。
+        """
+        statuses = self.db.attachment_statuses()
 
         def build(dir_rel: str) -> List[Dict[str, Any]]:
             entries: List[Dict[str, Any]] = []
@@ -941,7 +946,12 @@ class VaultService:
                     )
                 else:
                     kind = "note" if p.suffix.lower() in MARKDOWN_EXTS else "file"
-                    entries.append({"name": p.name, "path": rel, "type": kind})
+                    entry: Dict[str, Any] = {"name": p.name, "path": rel, "type": kind}
+                    status = statuses.get(rel)
+                    if status and status.get("state") not in (None, "indexed"):
+                        entry["index_state"] = status["state"]
+                        entry["index_detail"] = status.get("detail", "")
+                    entries.append(entry)
             entries.sort(key=lambda e: (e["type"] != "dir", e["name"].lower()))
             return entries
 

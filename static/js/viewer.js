@@ -10,6 +10,15 @@ let currentReq = 0;
 /** 可写回的纯文本格式：与服务端 PLAIN_TEXT_EXTS 保持一致。 */
 const PLAIN_EXTS = new Set(['txt', 'text', 'log', 'csv', 'tsv']);
 
+/** 附件索引未完整建立时的可见提示（预览/下载不受影响）。 */
+const INDEX_HINTS = {
+  too_large: '该文件超过 20MB，未被全文索引；仍可预览与下载。',
+  truncated: '该文件较大，仅索引了前 20 万字；仍可预览与下载。',
+  empty: '未能抽取文本，未建立全文索引；仍可预览与下载。',
+  missing_converter: '缺少 LibreOffice，未建立全文索引；仍可预览与下载。',
+  failed: '文本抽取失败，未建立全文索引；仍可预览与下载。',
+};
+
 /** 是否纯文本/CSV（走 /api/plain-file 编辑，不注入 frontmatter）。 */
 export function isPlainPath(path) {
   const name = String(path || '');
@@ -108,6 +117,14 @@ export async function open(path, { refresh = false } = {}) {
     if (req !== currentReq) return;
     body.innerHTML = '';
     setMeta(`${(data.format || '').toUpperCase()} · ${formatSize(data.size)}${data.cached ? ' · 缓存' : ''}`);
+    if (data.index_status && data.index_status.state && data.index_status.state !== 'indexed') {
+      const notice = document.createElement('div');
+      notice.className = 'file-viewer__notice';
+      notice.textContent = INDEX_HINTS[data.index_status.state]
+        || '该文件未被完整索引；仍可预览与下载。';
+      if (data.index_status.detail) notice.title = data.index_status.detail;
+      body.appendChild(notice);
+    }
     if (data.kind === 'html' && PLAIN_EXTS.has(String(data.format || '').toLowerCase())) {
       $('#file-viewer-edit')?.classList.remove('hidden');
     }

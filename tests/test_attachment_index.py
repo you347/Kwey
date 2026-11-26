@@ -18,6 +18,17 @@ def _search_attachments(vault, *words: str):
     return vault.db.search_attachments(_terms(*words))
 
 
+def _find_tree_node(nodes, path: str):
+    for node in nodes or []:
+        if node.get("path") == path:
+            return node
+        if node.get("type") == "dir":
+            found = _find_tree_node(node.get("children") or [], path)
+            if found:
+                return found
+    return None
+
+
 def _make_docx(path: Path, text: str) -> None:
     content_types = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -107,6 +118,7 @@ class TestAttachmentIndex:
         assert total == 1
         assert hits[0]["path"] == "attachments/旧预算.xls"
         assert hits[0]["format"] == "xls"
+        assert vault.db.attachment_status("attachments/旧预算.xls")["state"] == "indexed"
 
     def test_bad_xls_does_not_break_index(self, vault):
         root = vault.paths.ensure_root()
@@ -142,6 +154,8 @@ class TestAttachmentIndex:
         before = vault.db.count_attachments()
         vault.indexer.reindex_attachment("attachments/无转换.doc")
         assert vault.db.count_attachments() == before
+        status = vault.db.attachment_status("attachments/无转换.doc")
+        assert status is not None and status["state"] == "missing_converter"
 
     def test_pdf_indexed(self, vault):
         reportlab = pytest.importorskip("reportlab.pdfgen.canvas")
@@ -175,9 +189,11 @@ class TestAttachmentIndex:
         path.write_bytes("待删除内容".encode("utf-8"))
         vault.indexer.reindex_attachment("attachments/临时.txt")
         assert _search_attachments(vault, "待删除")[1] == 1
+        assert vault.db.attachment_status("attachments/临时.txt")["state"] == "indexed"
 
         vault.indexer.remove_file_entry("attachments/临时.txt")
         assert _search_attachments(vault, "待删除")[1] == 0
+        assert vault.db.attachment_status("attachments/临时.txt") is None
 
     def test_write_plain_text_updates_index(self, vault):
         root = vault.paths.ensure_root()
@@ -248,3 +264,56 @@ class TestAttachmentSearchApi:
         )
         data = client.get("/api/search", params={"q": "词组乙"}).json()["data"]
         assert any(h["path"] == "attachments/可写.txt" and h["kind"] == "attachment" for h in data["hits"])
+
+
+class TestAttachmentStatus:
+    def test_oversize_not_indexed_and_visible(self, client, vault, monkeypatch):
+        import app.index.indexer as indexer
+
+        monkeypatch.setattr(indexer, "MAX_ATTACHMENT_BYTES", 8)
+        root = vault.paths.ensure_root()
+        (root / "attachments" / "超大.txt").write_bytes("超限内容".encode("utf-8"))
+        vault.indexer.reindex_attachment("attachments/超大.txt")
+
+        status = vault.db.attachment_status("attachments/超大.txt")
+        assert status is not None and status["state"] == "too_large"
+        assert _search_attachments(vault, "超限内容")[1] == 0
+
+        data = client.get("/api/preview", params={"path": "attachments/超大.txt"}).json()["data"]
+        assert data["index_status"]["state"] == "too_large"
+
+        node = _find_tree_node(client.get("/api/tree").json()["data"], "attachments/超大.txt")
+        assert node is not None
+        assert node["index_state"] == "too_large"
+        assert node["index_detail"]
+
+    def test_truncated_indexes_prefix_only(self, vault, monkeypatch):
+        import app.index.indexer as indexer
+
+        monkeypatch.setattr(indexer, "MAX_ATTACHMENT_INDEX_CHARS", 5)
+        root = vault.paths.ensure_root()
+        (root / "attachments" / "长文.txt").write_bytes("前缀关键字甲乙丙丁".encode("utf-8"))
+        vault.indexer.reindex_attachment("attachments/长文.txt")
+
+        status = vault.db.attachment_status("attachments/长文.txt")
+        assert status is not None and status["state"] == "truncated"
+        assert "仅索引前 5 字" in status["detail"]
+        assert _search_attachments(vault, "前缀关键")[1] == 1
+        assert _search_attachments(vault, "甲乙丙丁")[1] == 0
+
+        node = _find_tree_node(vault.tree(), "attachments/长文.txt")
+        assert node is not None and node["index_state"] == "truncated"
+
+    def test_empty_text_status(self, vault):
+        root = vault.paths.ensure_root()
+        (root / "attachments" / "空文件.txt").write_bytes(b"")
+        vault.indexer.reindex_attachment("attachments/空文件.txt")
+        status = vault.db.attachment_status("attachments/空文件.txt")
+        assert status is not None and status["state"] == "empty"
+
+    def test_indexed_status_on_preview(self, client, vault):
+        root = vault.paths.ensure_root()
+        (root / "attachments" / "正常.txt").write_bytes("正常内容".encode("utf-8"))
+        vault.indexer.reindex_attachment("attachments/正常.txt")
+        data = client.get("/api/preview", params={"path": "attachments/正常.txt"}).json()["data"]
+        assert data["index_status"]["state"] == "indexed"

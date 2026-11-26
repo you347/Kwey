@@ -68,6 +68,18 @@
   color: var(--broken);
 }
 
+/* 附件未被完整索引时的可见提示（不阻断预览/下载） */
+.file-viewer__notice {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
 .file-viewer__image {
   max-width: 100%;
   max-height: calc(100vh - 160px);

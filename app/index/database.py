@@ -76,6 +76,17 @@ DDL = [
         tokenize = 'unicode61 remove_diacritics 2'
     )
     """,
+    # 附件索引状态：让「超限/截断/缺转换器」等未完整索引原因在界面上可见
+    """
+    CREATE TABLE IF NOT EXISTS attachment_status (
+        path    TEXT PRIMARY KEY,
+        state   TEXT NOT NULL,
+        detail  TEXT,
+        mtime   REAL,
+        size    INTEGER,
+        updated REAL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)
     """,
@@ -148,6 +159,7 @@ class IndexDatabase:
             c.execute("DELETE FROM links")
             c.execute("DELETE FROM notes_fts")
             c.execute("DELETE FROM attachments_fts")
+            c.execute("DELETE FROM attachment_status")
             c.execute("DELETE FROM props")
             c.execute("DELETE FROM meta")
             c.commit()
@@ -300,6 +312,57 @@ class IndexDatabase:
     def count_attachments(self) -> int:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) FROM attachments_fts").fetchone()[0])
+
+    def set_attachment_status(
+        self,
+        path: str,
+        state: str,
+        detail: str = "",
+        mtime: Optional[float] = None,
+        size: Optional[int] = None,
+    ) -> None:
+        """记录附件索引状态（indexed / too_large / truncated / empty / ...）。"""
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO attachment_status (path, state, detail, mtime, size, updated)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(path) DO UPDATE SET"
+                " state=excluded.state, detail=excluded.detail, mtime=excluded.mtime,"
+                " size=excluded.size, updated=excluded.updated",
+                (path, state, detail or "", mtime, size, time.time()),
+            )
+            self.conn.commit()
+
+    def attachment_status(self, path: str) -> Optional[Dict[str, object]]:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT path, state, detail, mtime, size, updated"
+                " FROM attachment_status WHERE path = ?",
+                (path,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "path": row[0],
+            "state": row[1],
+            "detail": row[2] or "",
+            "mtime": row[3],
+            "size": row[4],
+            "updated": row[5],
+        }
+
+    def attachment_statuses(self) -> Dict[str, Dict[str, str]]:
+        """全部附件状态（文件树批量标注用）→ {path: {state, detail}}。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT path, state, detail FROM attachment_status"
+            ).fetchall()
+        return {r[0]: {"state": r[1], "detail": r[2] or ""} for r in rows}
+
+    def remove_attachment_status(self, path: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM attachment_status WHERE path = ?", (path,))
+            self.conn.commit()
 
     def search_attachments(
         self,

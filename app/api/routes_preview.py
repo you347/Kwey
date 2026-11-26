@@ -27,5 +27,7 @@ async def preview(path: str, refresh: int = 0):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PreviewError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    # 附件索引状态（超限/截断/缺转换器）随预览一起返回，供界面提示「未完整索引」
+    data["index_status"] = deps.require_db().attachment_status(rel)
     data["url"] = "/file/" + quote(rel)
     return {"code": 0, "data": data, "message": "ok"}

@@ -100,28 +100,47 @@ class Indexer:
         if ext not in ATTACHMENT_TEXT_EXTS or not abs_path.is_file():
             return
         try:
-            if abs_path.stat().st_size > MAX_ATTACHMENT_BYTES:
-                self.db.remove_attachment_fts(rel)
-                return
-            if ext == ".doc":
-                # .doc 必须先经 LibreOffice 转 docx；缺转换器时不做无效尝试
-                from app.viewers.render import find_soffice
+            stat = abs_path.stat()
+        except OSError:
+            self.db.remove_attachment_fts(rel)
+            self.db.remove_attachment_status(rel)
+            return
 
-                if find_soffice() is None:
-                    self.db.remove_attachment_fts(rel)
-                    return
+        def mark(state: str, detail: str = "") -> None:
+            self.db.set_attachment_status(rel, state, detail, stat.st_mtime, stat.st_size)
+
+        if stat.st_size > MAX_ATTACHMENT_BYTES:
+            self.db.remove_attachment_fts(rel)
+            mark("too_large", f"文件 {stat.st_size} 字节，超过 20MB 索引上限")
+            return
+        if ext == ".doc":
+            # .doc 必须先经 LibreOffice 转 docx；缺转换器时不做无效尝试
+            from app.viewers.render import find_soffice
+
+            if find_soffice() is None:
+                self.db.remove_attachment_fts(rel)
+                mark("missing_converter", "未检测到 LibreOffice/soffice，无法转换 .doc")
+                return
+        try:
             text = extract_text(abs_path, self.paths.ensure_root() / ".kwey" / "previews")
         except Exception:  # noqa: BLE001 —— 坏文件不阻断整体索引
             logger.warning("附件文本抽取失败（跳过）: %s", rel, exc_info=True)
             self.db.remove_attachment_fts(rel)
+            mark("failed", "文本抽取失败")
             return
         text = (text or "").strip()
         if not text:
             self.db.remove_attachment_fts(rel)
+            mark("empty", "未能抽取到文本")
             return
-        self.db.upsert_attachment_fts(
-            rel, abs_path.name, text[:MAX_ATTACHMENT_INDEX_CHARS]
-        )
+        if len(text) > MAX_ATTACHMENT_INDEX_CHARS:
+            self.db.upsert_attachment_fts(
+                rel, abs_path.name, text[:MAX_ATTACHMENT_INDEX_CHARS]
+            )
+            mark("truncated", f"原文 {len(text)} 字，仅索引前 {MAX_ATTACHMENT_INDEX_CHARS} 字")
+            return
+        self.db.upsert_attachment_fts(rel, abs_path.name, text)
+        mark("indexed", "")
 
     def reindex_note(self, rel: str, broadcast: bool = True) -> bool:
         """单文件增量索引。返回链接关系是否发生变化（links_changed 判定）。
@@ -192,6 +211,7 @@ class Indexer:
         rel = normalize_rel(rel)
         self.db.remove_note(rel)
         self.db.remove_attachment_fts(rel)
+        self.db.remove_attachment_status(rel)
         if break_links:
             self.db.break_links_to(rel)
         self.linkgraph.remove(rel)
@@ -206,6 +226,7 @@ class Indexer:
         rel = normalize_rel(rel)
         self.linkgraph.remove_entry(rel)
         self.db.remove_attachment_fts(rel)
+        self.db.remove_attachment_status(rel)
 
     # ------------------------------------------------------------------ revive
     def revive_all_unresolved(self) -> int:
