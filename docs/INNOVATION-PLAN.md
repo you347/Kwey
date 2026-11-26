@@ -151,7 +151,7 @@ A/B MVP 不新增 MCP 工具，contract 工具数仍为28。新增职责 API 是
 
 | 对象 | 最小字段 | 约束 |
 |---|---|---|
-| DutyDefinition | id、recipe、enabled、scope、schedule、limits、config_version | recipe 枚举；scope 为合法相对目录；MVP 策略只能 manual |
+| DutyDefinition | id、recipe、enabled、scope、schedule、limits、config_version、（读出附 scope_required） | recipe 枚举；scope 为合法相对目录；MVP 策略只能 manual；scope 为空时仅 scope_required=true 的职责不可运行 |
 | DutyRun | run_id、duty_id、vault_generation、input_hash、slot、status、started/ended、model_usage、error_code | 幂等键唯一；失败/限额/未配置模型独立状态 |
 | Proposal | proposal_id、run_id、version、ops、diffs、manifest、sources、reason、proposal_hash、status、expires_at | 审核对象版本固定；正文敏感信息不进普通日志；默认7天过期 |
 | ManifestEntry | path、exists、raw_sha256、mtime、role（输入/写目标/链接影响） | 哈希为正确性门禁，mtime 为快速检查；创建目标也记录“不存在” |

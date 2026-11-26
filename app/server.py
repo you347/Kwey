@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -196,5 +196,13 @@ def create_app(
     @app.get("/", include_in_schema=False)
     async def index():
         return FileResponse(str(STATIC_DIR / "index.html"), media_type="text/html; charset=utf-8")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        """浏览器默认会请求 /favicon.ico：复用桌面窗口图标，避免 404 噪声。"""
+        icon = STATIC_DIR / "icons" / "kwey.ico"
+        if not icon.is_file():
+            return Response(status_code=204)
+        return FileResponse(str(icon), media_type="image/x-icon")
 
     return app

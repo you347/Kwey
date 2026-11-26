@@ -249,9 +249,14 @@ def validate_payload(payload: Any) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------- 提取
+# 中文句读可零宽切分；ASCII 句点/问号/感叹号/分号后必须有空白才算句末，
+# 否则 ".kwey"、"v1.2"、"a@b.com" 这类点号会被误当句末拆出碎片。
+_SENTENCE_SPLIT_RE = re.compile(r"[\n\r]+|(?<=[。！？；])|(?<=[.!?;])\s+")
+
+
 def _sentences(text: str) -> List[str]:
     """按行与中英文句读切分；保留原顺序，过滤过短片段。"""
-    parts = re.split(r"[\n\r]+|(?<=[。！？；;.!?])\s*", text)
+    parts = _SENTENCE_SPLIT_RE.split(text)
     out: List[str] = []
     for part in parts:
         clean = re.sub(r"\s+", " ", part).strip()

@@ -86,6 +86,13 @@ def test_overview_seeds_three_disabled_duties(client):
         "weekly_health",
     }
     assert all(item["enabled"] is False for item in data["definitions"])
+    # 空范围语义：仅收件箱值班必填，每日简报/每周巡检按全库运行。
+    required = {item["recipe"]: item["scope_required"] for item in data["definitions"]}
+    assert required == {
+        "inbox_duty": True,
+        "daily_brief": False,
+        "weekly_health": False,
+    }
     assert data["runtime_state"]["mode"] == "server"
     assert data["runtime_state"]["apply_enabled"] is False
     assert data["pending_count"] == 0

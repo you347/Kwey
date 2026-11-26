@@ -345,3 +345,18 @@ class TestAttachmentSettings:
             "源码问题：delete_dir 未清理目录下非笔记文件的链接图登记（"
             "app/vault/service.py delete_dir 仅遍历 notes 表），见测试 test_delete_dir_cleans_graph"
         )
+
+
+# ---------------------------------------------------------------- 静态入口
+
+class TestStaticEntryPoints:
+    def test_favicon_served_from_desktop_icon(self, client):
+        resp = client.get("/favicon.ico")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/x-icon"
+        assert resp.content[:4] == b"\x00\x00\x01\x00", "应返回 ICO 文件头"
+
+    def test_index_still_served(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]

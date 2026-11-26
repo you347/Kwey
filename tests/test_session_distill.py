@@ -198,6 +198,24 @@ class TestExtraction:
         assert set(result["sources"]) <= {e["id"] for e in _payload()["events"]}
         assert all(s["quote"].strip() for s in result["sources"].values())
 
+
+class TestSentenceSplitting:
+    def test_dot_inside_path_is_not_a_sentence_boundary(self):
+        from app.agent.session_distill import _sentences
+
+        parts = _sentences("不要动 .kwey 目录，也不要改写完历史。")
+        assert parts == ["不要动 .kwey 目录，也不要改写完历史。"]
+
+    def test_ascii_break_requires_trailing_space(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("Use v1.2. Then push.") == ["Use v1.2.", "Then push."]
+
+    def test_cjk_terminators_split_without_space(self):
+        from app.agent.session_distill import _sentences
+
+        assert _sentences("先定方案。再补测试。") == ["先定方案。", "再补测试。"]
+
     def test_no_evidence_candidates_are_dropped(self):
         doc = validate_payload(_payload())
         extracted = extract(doc)

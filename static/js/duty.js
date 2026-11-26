@@ -24,6 +24,8 @@ const STYLE_ID = 'duty-style';
 const PROPOSAL_PAGE_SIZE = 50;
 const RUN_PAGE_SIZE = 30;
 const BADGE_POLL_MS = 45000;
+// 运行记录里有排队/运行中的任务时，面板打开期间自动刷新（终态后自动停）。
+const RUN_POLL_MS = 3000;
 const MAX_DIFF_ROWS = 400;
 
 /* =====================================================================
@@ -77,6 +79,9 @@ function normalizeDuty(d) {
     recipe: str(d && d.recipe) || 'unknown',
     enabled: !!(d && d.enabled),
     scope: typeof (d && d.scope) === 'string' ? d.scope : str(d && d.scope && d.scope.path),
+    scopeRequired: d && d.scope_required === true
+      ? true
+      : (d && d.scope_required === false ? false : null),
     schedule: schedule && typeof schedule === 'object'
       ? schedule
       : (typeof schedule === 'string' ? { kind: schedule } : null),
@@ -380,6 +385,7 @@ const dt = {
 let dom = null;
 let initialized = false;
 let pollTimer = null;
+let runPollTimer = null;
 let detailSeq = 0;
 
 /* =====================================================================
@@ -652,6 +658,7 @@ export function closeDuty() {
   dt.conflict = null;
   dt.actionError = null;
   if (dom) dom.overlay.classList.add('hidden');
+  stopRunPolling();
   try {
     if (dt.prevFocus && typeof dt.prevFocus.focus === 'function') dt.prevFocus.focus({ preventScroll: true });
   } catch { /* 目标已卸载 */ }
@@ -771,6 +778,30 @@ function startPolling() {
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+}
+
+function hasActiveRuns() {
+  return dt.runs.some((r) => r && (r.status === 'queued' || r.status === 'running'));
+}
+
+function startRunPolling() {
+  if (runPollTimer || !hasActiveRuns()) return;
+  runPollTimer = setInterval(() => {
+    if (!dt.open || dt.tab !== 'runs' || dt.detail || document.visibilityState !== 'visible') {
+      stopRunPolling();
+      return;
+    }
+    loadRuns(null, { silent: true })
+      .catch(() => {})
+      .finally(() => {
+        if (!hasActiveRuns()) stopRunPolling();
+      });
+  }, RUN_POLL_MS);
+}
+
+function stopRunPolling() {
+  if (runPollTimer) clearInterval(runPollTimer);
+  runPollTimer = null;
 }
 
 /* =====================================================================
@@ -935,6 +966,14 @@ function runtimeStrip(runtime) {
   return box;
 }
 
+function scopeText(def) {
+  const scope = String(def.scope || '').trim();
+  if (scope) return scope;
+  // 空范围只有「要求必填」的职责不可运行；其余（每日简报/每周巡检）按全库处理。
+  if (def.scopeRequired === false) return '全库（默认）';
+  return '未设置（职责不可运行）';
+}
+
 function dutyCard(def) {
   const card = el('div', 'duty-card');
 
@@ -964,7 +1003,7 @@ function dutyCard(def) {
   if (meta && meta.desc) card.appendChild(el('div', 'duty-card__desc', meta.desc));
 
   const facts = el('div', 'duty-facts');
-  facts.appendChild(fact('范围', def.scope || '未设置（职责不可运行）'));
+  facts.appendChild(fact('范围', scopeText(def)));
   facts.appendChild(fact('时间', scheduleText(def.schedule)));
   facts.appendChild(fact('预算', limitsText(def.limits)));
   facts.appendChild(fact('配置版本', def.configVersion == null ? '—' : `v${def.configVersion}`));
@@ -1522,8 +1561,8 @@ async function fetchRunProposalStatuses(items = []) {
   return map;
 }
 
-async function loadRuns(cursor = null, { append = false } = {}) {
-  if (!append) {
+async function loadRuns(cursor = null, { append = false, silent = false } = {}) {
+  if (!append && !silent) {
     dt.loading.runs = true;
     dt.errors.runs = null;
     if (!dt.detail) render();
@@ -1543,10 +1582,13 @@ async function loadRuns(cursor = null, { append = false } = {}) {
     if (err && err.code === 404) {
       dt.unavailable = true;
       stopPolling();
+      stopRunPolling();
     }
   } finally {
     dt.loading.runs = false;
     if (!dt.detail) render();
+    if (dt.open && dt.tab === 'runs' && !dt.detail && hasActiveRuns()) startRunPolling();
+    else stopRunPolling();
   }
 }
 
@@ -1602,8 +1644,10 @@ function selectTab(id) {
     dt.actionError = null;
   }
   dt.tab = id;
+  if (id !== 'runs') stopRunPolling();
   render();
   loadTab({ force: dt.tab === 'proposals' && dt.proposalsLoaded });
+  if (id === 'runs' && hasActiveRuns()) startRunPolling();
 }
 
 async function toggleDuty(id) {
@@ -1636,7 +1680,11 @@ async function runDuty(id) {
   try {
     const res = await dutyApi.runDuty(id, def.configVersion);
     toast(`已加入运行队列${res.runId ? `（${res.runId}）` : ''}；不会立即写入笔记`, 'success');
-    selectTab('runs');
+    // 入队后必须强制重载，否则已加载过的列表看不到新任务，会停在旧的「排队中」。
+    dt.runsLoaded = false;
+    if (dt.tab === 'runs' && !dt.detail) await loadRuns();
+    else selectTab('runs');
+    if (dt.open) startRunPolling();
   } catch (err) {
     toast(`试跑失败：${err.message}`, 'error');
   } finally {

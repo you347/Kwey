@@ -366,12 +366,15 @@ class DutySupervisor:
     # ------------------------------------------------------------------ definitions
     def _definition_payload(self, definition: Mapping[str, Any]) -> Dict[str, Any]:
         scope = [str(item) for item in (definition.get("scope") or [])]
+        recipe = recipe_for(str(definition["recipe"]))
         return {
             "id": str(definition["duty_id"]),
             "duty_id": str(definition["duty_id"]),
             "recipe": str(definition["recipe"]),
             "enabled": bool(definition.get("enabled")),
             "scope": ",".join(scope),
+            # 空范围对 daily_brief / weekly_health 是「全库」默认，仅 inbox_duty 要求必填。
+            "scope_required": bool(recipe.requires_scope),
             "schedule": dict(definition.get("schedule") or {}),
             "limits": dict(definition.get("limits") or {}),
             "config_version": int(definition.get("config_version") or 1),
