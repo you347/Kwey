@@ -168,6 +168,25 @@ class TestPreviewFormats:
         assert "LibreOffice" in data["reason"] and "下载" in data["reason"]
 
 
+class TestFindSoffice:
+    def test_prefers_path(self, monkeypatch):
+        import app.viewers.render as render
+
+        monkeypatch.setattr(
+            render.shutil, "which", lambda name: r"C:\tools\soffice.exe" if name == "soffice" else None
+        )
+        assert render.find_soffice() == r"C:\tools\soffice.exe"
+
+    def test_common_windows_install_path(self, monkeypatch):
+        """安装包默认路径（不在 PATH）也必须能检测到。"""
+        import app.viewers.render as render
+
+        common = r"C:\Program Files\LibreOffice\program\soffice.exe"
+        monkeypatch.setattr(render.shutil, "which", lambda name: None)
+        monkeypatch.setattr(Path, "is_file", lambda self: str(self) == common)
+        assert render.find_soffice() == common
+
+
 class TestDocConversion:
     def test_convert_caches_docx(self, tmp_path: Path, monkeypatch):
         import app.viewers.render as render
