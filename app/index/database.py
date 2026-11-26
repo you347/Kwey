@@ -67,6 +67,15 @@ DDL = [
         tokenize = 'unicode61 remove_diacritics 2'
     )
     """,
+    # 附件全文索引：与笔记库完全隔离（不含标签/双链语义、不参与图扩展）
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS attachments_fts USING fts5 (
+        path UNINDEXED,
+        title,
+        body,
+        tokenize = 'unicode61 remove_diacritics 2'
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)
     """,
@@ -138,6 +147,7 @@ class IndexDatabase:
             c.execute("DELETE FROM tags")
             c.execute("DELETE FROM links")
             c.execute("DELETE FROM notes_fts")
+            c.execute("DELETE FROM attachments_fts")
             c.execute("DELETE FROM props")
             c.execute("DELETE FROM meta")
             c.commit()
@@ -269,6 +279,79 @@ class IndexDatabase:
                 (path, cjk_space(title), cjk_space(body), cjk_space(tags_joined)),
             )
             c.commit()
+
+    # ------------------------------------------------------------------ attachments
+    def upsert_attachment_fts(self, path: str, title: str, body: str) -> None:
+        """写入附件全文（先删后插）；与 notes_fts 完全隔离。"""
+        with self._lock:
+            c = self.conn
+            c.execute("DELETE FROM attachments_fts WHERE path = ?", (path,))
+            c.execute(
+                "INSERT INTO attachments_fts (path, title, body) VALUES (?, ?, ?)",
+                (path, cjk_space(title), cjk_space(body)),
+            )
+            c.commit()
+
+    def remove_attachment_fts(self, path: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM attachments_fts WHERE path = ?", (path,))
+            self.conn.commit()
+
+    def count_attachments(self) -> int:
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) FROM attachments_fts").fetchone()[0])
+
+    def search_attachments(
+        self,
+        terms: List[str],
+        path_prefix: Optional[str] = None,
+        file_pattern: Optional[str] = None,
+        limit: int = 50,
+    ) -> Tuple[List[Dict], int]:
+        """附件全文检索。返回 (hits, total)，hit 带 ``kind='attachment'``。
+
+        附件没有标签/双链，只支持 path:/file: 过滤（tag: 不适用于附件）。
+        """
+        if not terms:
+            return [], 0
+        where = ["attachments_fts MATCH :match"]
+        params: Dict[str, object] = {"match": " ".join(terms), "limit": limit}
+        if path_prefix:
+            where.append("path LIKE :pp")
+            params["pp"] = path_prefix.rstrip("/") + "/%"
+        if file_pattern:
+            where.append("(title LIKE :fp OR path LIKE :fp2)")
+            params["fp"] = f"%{file_pattern}%"
+            params["fp2"] = f"%{file_pattern}%"
+        where_sql = " WHERE " + " AND ".join(where)
+
+        with self._lock:
+            c = self.conn
+            total = int(
+                c.execute(f"SELECT COUNT(*) FROM attachments_fts{where_sql}", params).fetchone()[0]
+            )
+            rows = c.execute(
+                "SELECT path, title, -bm25(attachments_fts) AS score,"
+                " snippet(attachments_fts, 2, '<mark>', '</mark>', '…', 24) AS snip"
+                f" FROM attachments_fts{where_sql}"
+                " ORDER BY score DESC, path ASC LIMIT :limit",
+                params,
+            ).fetchall()
+
+        hits = [
+            {
+                "path": r[0],
+                # 标题取路径末段原文：FTS 里按字切分会带空格，不能直接展示
+                "title": str(r[0]).rsplit("/", 1)[-1],
+                "score": round(float(r[2]), 6),
+                "snippet": cjk_compact(r[3] or ""),
+                "tags": [],
+                "kind": "attachment",
+                "format": str(r[0]).rsplit(".", 1)[-1].lower() if "." in str(r[0]) else "",
+            }
+            for r in rows
+        ]
+        return hits, total
 
     # ------------------------------------------------------------------ links
     def replace_links(self, path: str, rows: Sequence[Tuple[str, Optional[str], str, int]]) -> None:

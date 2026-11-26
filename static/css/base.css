@@ -171,6 +171,10 @@ input:focus, select:focus, textarea:focus {
 .result-item__title mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
 .result-item__path { font-size: var(--fs-xs); color: var(--text-dim); }
 .result-item__snippet { font-size: var(--fs-xs); color: var(--text-dim); }
+.result-item__badge {
+  margin-left: 6px; padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); font-size: var(--fs-xs);
+}
 .result-item__snippet mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
 .result-item__hotkey { float: right; color: var(--text-dim); font-size: var(--fs-xs); }
 

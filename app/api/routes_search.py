@@ -108,6 +108,24 @@ def _fts_search(
         raise HTTPException(status_code=400, detail=f"查询语法不受支持: {exc}") from exc
 
 
+def _attachment_search(
+    db: IndexDatabase, parsed: Dict, match_terms: List[str], limit: int
+) -> Tuple[List[Dict], int]:
+    """附件全文检索（独立索引）：无检索词或 tag: 过滤时不参与。"""
+    if not match_terms or parsed.get("tag"):
+        return [], 0
+    try:
+        return db.search_attachments(
+            terms=match_terms,
+            path_prefix=parsed["path"],
+            file_pattern=parsed["file"],
+            limit=limit,
+        )
+    except Exception:  # noqa: BLE001 —— 附件索引异常不拖垮笔记检索
+        logger.exception("附件检索失败（已跳过）")
+        return [], 0
+
+
 def _num(value: object, default: float) -> float:
     try:
         return float(value)  # type: ignore[arg-type]
@@ -277,6 +295,13 @@ async def search(
             },
         )
         hits = hits[:limit]
+    for hit in hits:
+        hit["kind"] = "note"
+    # 附件命中排在笔记之后（独立索引，不参与标签/图/向量融合）
+    att_hits, att_total = _attachment_search(db, parsed, match_terms, limit)
+    if att_hits:
+        total += att_total
+        hits.extend(att_hits[: max(0, limit - len(hits))])
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
 
     data: Dict = {

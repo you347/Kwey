@@ -16,11 +16,16 @@ from app.parser import frontmatter as fm_mod
 from app.parser.tags import extract_inline_tags, normalize_fm_tags
 from app.parser.wikilink import extract_wikilinks, split_anchor
 from app.paths import AppPaths, is_ignored, normalize_rel
+from app.viewers.extract import IMAGE_EXTS, SUPPORTED_EXTS, extract_text
 
 logger = logging.getLogger("kwey.indexer")
 
 MARKDOWN_EXTS = {".md", ".markdown"}
 NOTE_EXTS = MARKDOWN_EXTS
+# 可抽文本的附件格式（图片没有文本，跳过抽取）
+ATTACHMENT_TEXT_EXTS = SUPPORTED_EXTS - IMAGE_EXTS
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_INDEX_CHARS = 200_000
 
 _EXCERPT_STRIP = re.compile(r"(^|\s)#{1,6}\s+|[*_`>]+|!\[[^\]]*\]\([^)]*\)|\[([^\]]*)\]\([^)]*\)")
 
@@ -73,8 +78,8 @@ class Indexer:
                 self.reindex_note(rel, broadcast=False)
                 count += 1
             else:
-                # 附件等非笔记文件登记进图，供 ![[嵌入]] 按文件名解析
-                self.linkgraph.upsert_file(rel)
+                # 附件等非笔记文件登记进图，并抽取纯文本进独立附件索引
+                self.reindex_attachment(rel)
         # 全部 basename 就绪后，复活未解析链接
         self.revive_all_unresolved()
         self.db.stamp_index_ready()
@@ -82,11 +87,33 @@ class Indexer:
 
     # ------------------------------------------------------------------ single
     def reindex_attachment(self, rel: str) -> None:
-        """非笔记附件的增量索引：登记文件名，供嵌入与后续附件全文索引使用。"""
+        """非笔记附件的增量索引：登记文件名 + 抽取纯文本进 attachments_fts。
+
+        附件索引与笔记索引完全隔离（无标签/双链语义）；抽取失败只记日志。
+        """
         rel = normalize_rel(rel)
         if is_ignored(rel):
             return
         self.linkgraph.upsert_file(rel)
+        abs_path = self.paths.to_abs(rel)
+        if abs_path.suffix.lower() not in ATTACHMENT_TEXT_EXTS or not abs_path.is_file():
+            return
+        try:
+            if abs_path.stat().st_size > MAX_ATTACHMENT_BYTES:
+                self.db.remove_attachment_fts(rel)
+                return
+            text = extract_text(abs_path)
+        except Exception:  # noqa: BLE001 —— 坏文件不阻断整体索引
+            logger.warning("附件文本抽取失败（跳过）: %s", rel, exc_info=True)
+            self.db.remove_attachment_fts(rel)
+            return
+        text = (text or "").strip()
+        if not text:
+            self.db.remove_attachment_fts(rel)
+            return
+        self.db.upsert_attachment_fts(
+            rel, abs_path.name, text[:MAX_ATTACHMENT_INDEX_CHARS]
+        )
 
     def reindex_note(self, rel: str, broadcast: bool = True) -> bool:
         """单文件增量索引。返回链接关系是否发生变化（links_changed 判定）。
@@ -144,8 +171,8 @@ class Indexer:
                 logger.exception("向量索引写入失败（跳过）: %s", rel)
             return old_links != new_links
 
-        # 非笔记文件：仅登记进图（附件嵌入解析用）
-        self.linkgraph.upsert_file(rel)
+        # 非笔记文件：登记进图 + 更新附件全文索引
+        self.reindex_attachment(rel)
         return False
 
     def remove_note(self, rel: str, break_links: bool = False) -> None:
@@ -156,6 +183,7 @@ class Indexer:
         """
         rel = normalize_rel(rel)
         self.db.remove_note(rel)
+        self.db.remove_attachment_fts(rel)
         if break_links:
             self.db.break_links_to(rel)
         self.linkgraph.remove(rel)
@@ -166,9 +194,10 @@ class Indexer:
             logger.exception("向量索引移除失败（跳过）: %s", rel)
 
     def remove_file_entry(self, rel: str) -> None:
-        """非笔记文件移除（附件删除）。"""
+        """非笔记文件移除（附件删除）：同步清掉附件索引。"""
         rel = normalize_rel(rel)
         self.linkgraph.remove_entry(rel)
+        self.db.remove_attachment_fts(rel)
 
     # ------------------------------------------------------------------ revive
     def revive_all_unresolved(self) -> int:

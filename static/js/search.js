@@ -52,7 +52,10 @@ function moveSelection(delta) {
 
 function pickSelection() {
   const el = resultsEl.querySelector('.result-item--active') || resultsEl.querySelector('.result-item');
-  if (el && el.dataset.path) { emit('open-note', el.dataset.path); closeSearch(); }
+  if (el && el.dataset.path) {
+    emit(el.dataset.kind === 'attachment' ? 'open-file' : 'open-note', el.dataset.path);
+    closeSearch();
+  }
 }
 
 async function runSearch(q) {
@@ -72,15 +75,21 @@ async function runSearch(q) {
     head.textContent = `共 ${data.total} 条 · ${data.elapsed_ms}ms`;
     resultsEl.appendChild(head);
     data.hits.forEach((hit, i) => {
+      const isAttachment = hit.kind === 'attachment';
       const el = document.createElement('div');
       el.className = `result-item${i === 0 ? ' result-item--active' : ''}`;
       el.dataset.path = hit.path;
+      el.dataset.kind = isAttachment ? 'attachment' : 'note';
+      const badge = isAttachment ? '<small class="result-item__badge">附件</small>' : '';
       // snippet 由服务端转义 + <mark> 高亮，此处可直接插入
       el.innerHTML = `
-        <span class="result-item__title">${escapeText(hit.title)}${hit.tags.map((t) => ` <small>#${escapeText(t)}</small>`).join('')}</span>
+        <span class="result-item__title">${escapeText(hit.title)}${badge}${hit.tags.map((t) => ` <small>#${escapeText(t)}</small>`).join('')}</span>
         <span class="result-item__path">${escapeText(hit.path)}</span>
         ${hit.snippet ? `<span class="result-item__snippet">${hit.snippet}</span>` : ''}`;
-      el.addEventListener('click', () => { emit('open-note', hit.path); closeSearch(); });
+      el.addEventListener('click', () => {
+        emit(isAttachment ? 'open-file' : 'open-note', hit.path);
+        closeSearch();
+      });
       resultsEl.appendChild(el);
     });
   } catch (err) { reportError(err); }
